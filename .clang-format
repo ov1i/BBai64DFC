@@ -1,0 +1,6 @@
+BaseOnStyle: Microsoft
+AllignAfterOpenBracket: DontAllign
+ColumnLimit: '180'
+PointerAlignement: left
+SortIncludes: 'true'
+SortUsingDeclarations: 'false'

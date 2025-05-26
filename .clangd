@@ -1,0 +1,46 @@
+CompileFlags:
+    Compiler: arm-none-eabi-gcc  # Specific ARM GCC toolchain
+    CompilationDatabase: .build/
+    Add: 
+        - -Wno-unknown-warning-option
+        - -Wall
+        - -Wextra
+        - -Wpedantic
+        - -Wshadow
+        - -Wdouble-promotion
+        - -Wformat=2
+        - -Wformat-truncation
+        - -Wundef
+        - -fno-common
+        - -Wno-unused-parameter
+        - -Wconversion
+        - -Wno-volatile
+        - -Wold-style-cast
+        - -Wuseless-cast
+        - -Wsuggest-override
+
+Diagnostics:
+    ClangTidy:
+        Add:
+            - bugprone*
+            - cert*
+            - concurrency-*
+            - cppcoreguidelines-*
+            - hicpp-*
+            - performance-*
+            - portability-*
+            - readability-*
+            - modernize-use-auto
+            - modernize-use-nullptr
+            - modernize-deprecated-headers
+            - performance-unnecessary-copy-initialization
+            - performance-for-range-copy
+            - cppcoreguidelines-no-malloc
+            - cppcoreguidelines-pro-bounds-pointer-arithmetic
+            - cppcoreguidelines-pro-bounds-constant-array-index
+            - clang-analyzer-*
+            
+        Remove:
+            - cppcoreguidelines-pro-bounds-pointer-arithmetic
+            - cppcoreguidelines-pro-bounds-constant-array-index
+            - hicpp-signed-bitwise

@@ -1,0 +1,12 @@
+[submodule "poky"]
+	path = deps/poky
+	url = git://git.yoctoproject.org/poky
+	branch = master
+[submodule "ti-deps"]
+	path = deps/ti-deps
+	url = https://git.yoctoproject.org/git/meta-arm
+	branch = master
+[submodule "deps/ti"]
+	path = deps/ti
+	url = https://git.ti.com/git/arago-project/meta-ti.git
+	branch = master

@@ -1,0 +1,9 @@
+[Unit]
+Description=Dummy
+
+[Service]
+ExecStart=/usr/bin/dummy.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
