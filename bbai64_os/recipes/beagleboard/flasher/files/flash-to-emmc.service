@@ -1,0 +1,13 @@
+[Unit]
+Description=Flash eMMC on First Boot
+ConditionPathExists=!/var/lib/flashed.flag
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flash-to-emmc.sh
+ExecStartPost=/bin/touch /etc/emmc_flashed
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+BBPATH = "${TOPDIR}"
+BBFILES ?= ""
+
+BBLAYERS ?= " \
+  ${TOPDIR}/../bbai64_os \
+  /home/ov1i/repos/BBai64DFC/deps/poky/meta \
+  /home/ov1i/repos/BBai64DFC/deps/poky/meta-poky \
+  ${TOPDIR}/../deps/ti-deps/meta-arm \
+  ${TOPDIR}/../deps/ti-deps/meta-arm-toolchain  \
+  ${TOPDIR}/../deps/ti/meta-beagle \
+  ${TOPDIR}/../deps/ti/meta-ti-bsp \
+  ${TOPDIR}/../deps/ti/meta-ti-extras \
+  "
