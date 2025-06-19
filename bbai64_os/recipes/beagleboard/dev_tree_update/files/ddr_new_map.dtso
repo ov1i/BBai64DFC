@@ -1,0 +1,23 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "ti,j721e";
+
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            reserved-memory {
+                #address-cells = <2>;
+                #size-cells = <2>;
+                ranges;
+
+                ddr_shared: ddr_shared@9c000000 {
+                    reg = <0x0 0x9c000000 0x0 0x00100000>; // 1MB at 0x9C000000
+                    no-map;
+                    status = "okay";
+                };
+            };
+        };
+    };
+};
