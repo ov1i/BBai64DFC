@@ -7,7 +7,7 @@ endif
 APP_NAME = dfc_app
 
 SRCDIR += . src src/common src/common/clusters src/common/clusters_configs src/common/clusters_configs/$(ISA) src/core_r5f2_0
-INCDIR += interface interface/common
+INCDIR += interface interface/common interface/common/types
 PACKAGE_SRCS_COMMON = .
 
 CFLAGS_LOCAL_COMMON += -DFREERTOS $(PDK_CFLAGS)
@@ -15,8 +15,8 @@ INCLUDE_EXTERNAL_INTERFACES += pdk freertos
 
 COMP_LIST_COMMON = $(PDK_COMMON_FREERTOS_COMP)
 
-SRCS_COMMON += rtos_main.c rsc_table.c
-
+SRCS_COMMON += rsc_table.c 
+SRCS_COMMON_CPP += rtos_main.cpp imu/i2c_helper.cpp imu/mpu9250.cpp comms/logger.cpp
 ifeq ($(ISA), r5f)
 	SRCS_COMMON += r5f_mpu_default.c
 endif

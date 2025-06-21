@@ -1,4 +1,4 @@
-SUMMARY = "BB AI-64 OS Factory Image"
+SUMMARY = "BB AI-64 OS Firmware Image"
 LICENSE = "MIT"
 
 inherit core-image
@@ -14,8 +14,8 @@ systemd-analyze \
 i2c-tools \
 network-remote-init \
 xz \
-env-init \
 ti-ipc \
+env-init \
 firmwares \
 "
 EXTRA_IMAGE_FEATURES ?= " allow-empty-password empty-root-password allow-root-login"

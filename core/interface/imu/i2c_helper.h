@@ -3,39 +3,31 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <ti/drv/i2c.h>
+extern "C" {
+#include <ti/drv/i2c/i2c.h>
+#include <ti/drv/i2c/soc/i2c_soc.h>
+}
+#include <dfc_types.h>
 
 #ifdef __cplusplus
-extern "C" {
-#endif
 
-typedef struct {
-    uint32_t base_addr;  
-    uint32_t speed_hz;   
-    uint8_t instance;
-} i2c_config_t;
+namespace i2c {
 
 class C_I2C {
     public:
-        i2c_interface() = default;
-        ~i2c_interface() = default;
+        C_I2C() = default;
+        ~C_I2C() = default;
 
-        boolean init(I2C_TypeDef* i2c_instance);
-        boolean sendByte(uint8 deviceAddr, uint8 regAddr, uint8 value);
-        boolean sendBytes(uint8 deviceAddr, uint8* buffer, uint16 bufferSize);
-        boolean receive(uint8 deviceAddr, uint8 regAddr, uint8* buffer, uint16 bufferSize);
+        bool init(uint32 instance);
+        bool writeRegSingletVal(uint8 dev_addr, const uint8 *reg_n_data);
+        bool rw(uint8 dev_addr, const uint8 *wbuffer, size_t wsize, uint8 *rbuffer, size_t rsize);
 
-        I2C_HandleTypeDef &getHandler() { return m_handler; }
+        I2C_Handle &getHandler();
     private:
-        I2C_HandleTypeDef m_handler;
+        I2C_Handle m_handler;
 };
 
-int i2c_init(const i2c_config_t *config);
-int i2c_read(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, size_t len);
-int i2c_write(uint8_t dev_addr, uint8_t reg_addr, const uint8_t *data, size_t len);
-
-#ifdef __cplusplus
-}
+} // namespace i2c
 #endif
 
 #endif // I2C_INTERFACE_H

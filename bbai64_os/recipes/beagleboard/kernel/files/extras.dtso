@@ -1,0 +1,16 @@
+/dts-v1/;
+/plugin/;
+
+&{/chosen} {
+	overlays {
+		extras.kernel = __TIMESTAMP__;
+	};
+};
+
+&main_sdhci1 {
+    sdhci-caps-mask = <0x07 0x0>;
+};
+
+&main_i2c6 {
+	status = "disabled";
+};

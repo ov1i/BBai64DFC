@@ -1,7 +1,0 @@
-/dts-v1/;
-/plugin/;
-
-&main_r5fss0_core0 {
-    status = "okay";
-    firmware-name = "r5f_imu_fw";
-};
