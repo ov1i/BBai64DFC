@@ -118,6 +118,7 @@ SECTIONS
     .bss.devgroup       : {*(.bss.devgroup*)} align(4)         > __CORE_DDR_SPACE
     .const.devgroup     : {*(.const.devgroup*)} align(4)       > __CORE_DDR_SPACE
     .boardcfg_data      : {} align(4)       > __CORE_DDR_SPACE
+    .shared_data        : {*(.shared_data_*)} align(64)      > SHARED_DDR_SPACE
 
     /* USB or any other LLD buffer for benchmarking */
     .benchmark_buffer (NOLOAD) {} align (8)     > __CORE_DDR_SPACE

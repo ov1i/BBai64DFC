@@ -2,13 +2,15 @@
 #define RSC_TABLE_H
 
 #include <stdint.h>
-#include <ti/drv/ipc/include/ipc_rsctypes.h>
+#include <rsc_table_types.h>
+#include <data_types.h>
 
+/* We keep this here just to clarify the main data type for our resource table */
 struct my_resource_table {
-    uint32_t ver;       // Version: always 1
-    uint32_t num;       // Number of entries
-    uint32_t reserved[2];
-    uint32_t offset[1]; // Empty/minimal table = no actual resources
+    struct resource_table_base  base;
+    uint32                      offset[1];
+    // struct fw_rsc_carveout      carveout_shared_full;
 };
+
 
 #endif // RSC_TABLE_H

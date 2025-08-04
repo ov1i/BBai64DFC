@@ -9,17 +9,29 @@ namespace imu {
 }
 
 typedef struct {
-    float64 ax, ay, az;  // Accelerometer
-    float64 gx, gy, gz;  // Gyroscope
-    float64 mx, my, mz;  // Magnetometer
-    // float64 ms[3];       // Magnetometer Sensibility
-    float64 temp;        // Temperature
+    float64 ax, ay, az;                 // Accelerometer
+    float64 gx, gy, gz;                 // Gyroscope
+    float64 mx, my, mz;                 // Magnetometer
+    float64 mag_adjustment[3];          // Magnetometer Sensibility
+    bool mag_rdy = false;               // Magnetometer Ready flag
+    float64 temp;                       // Temperature
 } DFC_t_MPU9250_Data;
 
 typedef struct {
-    float64 X[7];  // [q0, q1, q2, q3, bgx, bgy, bgz]  (Quaternion + Gyro Bias)
-    float64 P[7][7];  // Covariance Matrix
-} DFC_t_EKF_params;
+    float64 pressure;       // Accelerometer
+    // float64 temp;        // Temperature
+} DFC_t_BMP280_Data;
+
+typedef struct {
+    float64 ax, ay, az;
+    float64 gx, gy, gz;
+    float64 mx, my, mz;
+    float64 pressure;
+    float64 temperature;
+    uint64 timestamp_us;
+    bool has_mag;
+    bool has_baro;
+} DFC_t_EKF_Input;
 
 typedef struct {
     imu::C_IMU *imu;

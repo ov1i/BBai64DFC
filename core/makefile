@@ -6,28 +6,17 @@ endif
 
 APP_NAME = dfc_app
 
-SRCDIR += . src src/common src/common/clusters src/common/clusters_configs src/common/clusters_configs/$(ISA) src/core_r5f2_0
+SRCDIR += . src src/common src/common/clusters src/common/clusters_configs src/core_r5f2_0
 INCDIR += interface interface/common interface/common/types
 PACKAGE_SRCS_COMMON = .
 
 CFLAGS_LOCAL_COMMON += -DFREERTOS $(PDK_CFLAGS)
-INCLUDE_EXTERNAL_INTERFACES += pdk freertos
+INCLUDE_EXTERNAL_INTERFACES += pdk freertos $(EXTERNAL_INTERFACES)
 
 COMP_LIST_COMMON = $(PDK_COMMON_FREERTOS_COMP)
 
-SRCS_COMMON += rsc_table.c 
-SRCS_COMMON_CPP += rtos_main.cpp imu/i2c_helper.cpp imu/mpu9250.cpp comms/logger.cpp
-ifeq ($(ISA), r5f)
-	SRCS_COMMON += r5f_mpu_default.c
-endif
-
-ifeq ($(ISA), c66)
-	SRCS_COMMON += c66_cache_mar.c
-endif
-
-ifeq ($(ISA), c7x)
-    SRCS_COMMON += c7x_mmu.c
-endif
+SRCS_COMMON += r5f/rsc_table.c 
+SRCS_COMMON_CPP += rtos_main.cpp i2c/i2c_helper.cpp imu/mpu9250.cpp #comms/logger.cpp
 
 EXTERNAL_LNKCMD_FILE_LOCAL = $(PDK_INSTALL_PATH)/ti/drv/ipc/examples/DFC/src/common/clusters/$(ISA)/lnk_$(ISA)_$(CORE).lds
 APPEND_LNKCMD_FILE += $(PDK_INSTALL_PATH)/ti/drv/ipc/examples/DFC/src/common/clusters/memory_map_ddr.cmd

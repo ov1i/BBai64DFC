@@ -18,4 +18,4 @@ export dfc_app_CORE_DEPENDENCY
 export dfc_app_XDC_CONFIGURO
 export dfc_app_BOARDLIST
 export dfc_app_$(SOC)_CORELIST
-export dfc_app_SBL_APPIMAGEGEN = no
+export dfc_app_SBL_APPIMAGEGEN = yes

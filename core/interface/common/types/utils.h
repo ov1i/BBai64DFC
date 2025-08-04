@@ -2,13 +2,16 @@
 #define UTILS_H
 #include "data_types.h"
 
-#ifdef __cplusplus
+#define IMU_QUEUE_LENGTH                    (4)
+#define EKF_TASKSTACKSIZE                   (4096)
+#define IMU_TASKSTACKSIZE                   (2048)
+#define LOGGER_TASKSTACKSIZE                (1024)
+#define INIT_TASKSTACKSIZE                  (2048)
+#define LOGGER_BUFFER_SIZE                  (2048)
+#define LOGGER_MSG_MAXLEN                   (128)
 
-#define LOGGER_BUFFER_SIZE 1024
-#define IMU_QUEUE_LENGTH   4
-#define EKF_TASKSTACKSIZE      (4096)
-#define IMU_TASKSTACKSIZE      (2048)
-#define LOGGER_TASKSTACKSIZE   (1024)
+#define PADCONFIG_OFFSET_REG116             (116 * 4) // register number * 4 bytes per register
+#define PADCONFIG_OFFSET_REG121             (121 * 4) // register number * 4 bytes per register
 
 const uint8 MPU9250_ADDRESS =                0x68;
 
@@ -62,7 +65,5 @@ const uint8  MPU9250_MAG_Z_H =               0x08;
 const float32 accel_scale = 16384.0F;
 const float32 gyro_scale = 131.0F;
 const float64 deg_2_rad_cst = 0.017453292519943295;
-
-#endif
 
 #endif

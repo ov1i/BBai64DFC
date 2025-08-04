@@ -160,10 +160,11 @@ buildCustomSW() {
         gracefull_exit -3
     fi
 
-    bitbake -ccleansstate linux-bb.org #firmware-image
-    bitbake -ccleansstate env-init #firmware-image
-    bitbake linux-bb.org #firmware-image
-    bitbake firmware-image
+    bitbake -ccleansstate linux-bb.org
+    # bitbake -ccleansstate env-init
+    # bitbake -ccleansstate firmwares
+    bitbake linux-bb.org
+    # bitbake firmware-image
 
     if [ $? -ne 0 ]; then
         echo "Failed to build the project."
@@ -273,12 +274,11 @@ menuWrapper() {
    if [ $# -ne 1 ]; then
         echo "Usage: $0 [option] ..."
         echo -e "OPTIONS:"
-        echo -e "\t-sync:\t Sync env"
-        echo -e "\t-build:\t Build factory image"
+        echo -e "\t-build:\t\t Build factory image"
         echo -e "\t-buildi:\t Build custom sw image"
         echo -e "\t-buildf:\t Build custom firmwares"
         echo -e "\t-buildexp:\t Build express (CHUCHU) via docker container"
-        echo -e "\t-sync:\t Sync the enviroment"
+        echo -e "\t-sync:\t\t Sync the enviroment"
         echo -e "\t-btest:\t Build gtests for the sw"
         echo -e "\t-etest:\t Build and execute the gtests for the sw"
         echo -e "\t-liteclean:\t Clean build artifacts"
@@ -320,12 +320,11 @@ menuWrapper() {
         echo "Error: Invalid argument"
         echo "Usage: $0 [option] ..."
         echo -e "OPTIONS:"
-        echo -e "\t-sync:\t Sync env"
-        echo -e "\t-build:\t Build factory image"
+        echo -e "\t-build:\t\t Build factory image"
         echo -e "\t-buildi:\t Build custom sw image"
         echo -e "\t-buildf:\t Build custom firmwares"
         echo -e "\t-buildexp:\t Build express (CHUCHU) via docker container"
-        echo -e "\t-sync:\t Sync the enviroment"
+        echo -e "\t-sync:\t\t Sync the enviroment"
         echo -e "\t-liteclean:\t Clean build artifacts"
         echo -e "\t-fullclean:\t Clean build artifacts"
 

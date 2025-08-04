@@ -11,18 +11,18 @@ extern "C" {
 
 #ifdef __cplusplus
 
-namespace imu {
-    class C_IMU {
+namespace barometer {
+    class C_Barom {
     public:
-        C_IMU();
-        ~C_IMU() = default;
+        C_Barom();
+        ~C_Barom() = default;
 
         bool init();
         bool update();
-        void getCurrentRawData(DFC_t_MPU9250_Data *rawData);
+        void getCurrentRawData();
 
     private:
-        DFC_t_MPU9250_Data m_rawData;
+        DFC_t_BMP280_Data m_rawData;
         i2c::C_I2C m_i2cHandler;
         bool m_i2cState;
 };

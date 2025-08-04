@@ -17,10 +17,6 @@
 		serial2 = &main_uart0;
 		mmc0 = &main_sdhci0;
 		mmc1 = &main_sdhci1;
-		i2c0 = &wkup_i2c0;
-		// i2c1 = &main_i2c6;
-		i2c2 = &main_i2c2;
-		i2c3 = &main_i2c4;
 	};
 
 	chosen {
@@ -137,7 +133,6 @@
 		c66_1_memory_region: c66-memory@a7100000 {
 			compatible = "shared-dma-pool";
 			reg = <0x00 0xa7100000 0x00 0xf00000>;
-			no-map;
 		};
 
 		c71_0_dma_memory_region: c71-dma-memory@a8000000 {
@@ -364,61 +359,6 @@
 		>;
 	};
 
-	main_i2c0_pins_default: main-i2c0-default-pins {
-		pinctrl-single,pins = <
-			J721E_IOPAD(0x220, PIN_INPUT_PULLUP, 0) /* (AC5) I2C0_SCL */
-			J721E_IOPAD(0x224, PIN_INPUT_PULLUP, 0) /* (AA5) I2C0_SDA */
-		>;
-	};
-
-	main_i2c1_pins_default: main-i2c1-default-pins {
-		pinctrl-single,pins = <
-			J721E_IOPAD(0x228, PIN_INPUT_PULLUP, 0) /* (Y6) I2C1_SCL */
-			J721E_IOPAD(0x22c, PIN_INPUT_PULLUP, 0) /* (AA6) I2C1_SDA */
-		>;
-	};
-
-	main_i2c2_pins_default: main-i2c2-default-pins {
-		pinctrl-single,pins = <
-			J721E_IOPAD(0x208, PIN_INPUT_PULLUP, 4) /* (W5) MCAN0_RX.I2C2_SCL */
-			J721E_IOPAD(0x20c, PIN_INPUT_PULLUP, 4) /* (W6) MCAN0_TX.I2C2_SDA */
-			J721E_IOPAD(0x138, PIN_INPUT, 7) /* (AE25) PRG0_PRU1_GPO14.GPIO0_77 */
-			J721E_IOPAD(0x13c, PIN_INPUT, 7) /* (AF29) PRG0_PRU1_GPO15.GPIO0_78 */
-		>;
-	};
-
-	main_i2c3_pins_default: main-i2c3-default-pins {
-		pinctrl-single,pins = <
-			J721E_IOPAD(0x270, PIN_INPUT_PULLUP, 4) /* (T26) MMC2_CLK.I2C3_SCL */
-			J721E_IOPAD(0x274, PIN_INPUT_PULLUP, 4) /* (T25) MMC2_CMD.I2C3_SDA */
-		>;
-	};
-
-	main_i2c4_pins_default: main-i2c4-default-pins {
-		pinctrl-single,pins = <
-			J721E_IOPAD(0x1e0, PIN_INPUT_PULLUP, 2) /* (Y5) SPI1_D0.I2C4_SCL */
-			J721E_IOPAD(0x1dc, PIN_INPUT_PULLUP, 2) /* (Y1) SPI1_CLK.I2C4_SDA */
-			J721E_IOPAD(0x30, PIN_INPUT, 7) /* (AF24) PRG1_PRU0_GPO11.GPIO0_12 */
-			J721E_IOPAD(0x34, PIN_INPUT, 7) /* (AJ24) PRG1_PRU0_GPO12.GPIO0_13 */
-		>;
-	};
-
-	main_i2c5_pins_default: main-i2c5-default-pins {
-		pinctrl-single,pins = <
-			J721E_IOPAD(0x150, PIN_INPUT_PULLUP, 2) /* (Y26) PRG0_MDIO0_MDIO.I2C5_SCL */
-			J721E_IOPAD(0x154, PIN_INPUT_PULLUP, 2) /* (AA27) PRG0_MDIO0_MDC.I2C5_SDA */
-		>;
-	};
-
-	main_i2c6_pins_default: main-i2c6-default-pins {
-		pinctrl-single,pins = <
-			J721E_IOPAD(0x1d0, PIN_INPUT_PULLUP, 2) /* (AA3) SPI0_D1.I2C6_SCL */
-			J721E_IOPAD(0x1e4, PIN_INPUT_PULLUP, 2) /* (Y2) SPI1_D1.I2C6_SDA */
-			J721E_IOPAD(0x74, PIN_INPUT, 7) /* (AC21) PRG1_PRU1_GPO7.GPIO0_28 */
-			J721E_IOPAD(0xa4, PIN_INPUT, 7) /* (AH22) PRG1_PRU1_GPO19.GPIO0_40 */
-		>;
-	};
-
 	csi0_gpio_pins_default: csi0-gpio-default-pins {
 		pinctrl-single,pins = <
 			J721E_IOPAD(0x19c, PIN_INPUT_PULLDOWN, 7) /* (W27) RGMII6_TD0.GPIO0_102 */
@@ -574,57 +514,6 @@
 	disable-wp;
 };
 
-&main_i2c0 {
-	status = "okay";
-	pinctrl-names = "default";
-	pinctrl-0 = <&main_i2c0_pins_default>;
-	clock-frequency = <400000>;
-};
-
-&main_i2c1 {
-	status = "okay";
-	pinctrl-names = "default";
-	pinctrl-0 = <&main_i2c1_pins_default>;
-	clock-frequency = <400000>;
-};
-
-&main_i2c2 {
-	/* BBB Header: P9.19 and P9.20 */
-	status = "okay";
-	pinctrl-names = "default";
-	pinctrl-0 = <&main_i2c2_pins_default>;
-	clock-frequency = <100000>;
-};
-
-&main_i2c3 {
-	status = "okay";
-	pinctrl-names = "default";
-	pinctrl-0 = <&main_i2c3_pins_default>;
-	clock-frequency = <400000>;
-};
-
-&main_i2c4 {
-	/* BBB Header: P9.24 and P9.26 */
-	status = "okay";
-	pinctrl-names = "default";
-	pinctrl-0 = <&main_i2c4_pins_default>;
-	clock-frequency = <100000>;
-};
-
-&main_i2c5 {
-	status = "okay";
-	pinctrl-names = "default";
-	pinctrl-0 = <&main_i2c5_pins_default>;
-	clock-frequency = <400000>;
-};
-
-&main_i2c6 {
-	/* BBB Header: P9.17 and P9.18 */
-	status = "disabled";
-	pinctrl-names = "default";
-	pinctrl-0 = <&main_i2c6_pins_default>;
-	clock-frequency = <100000>;
-};
 
 &wkup_i2c0 {
 	status = "okay";

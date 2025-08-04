@@ -1,9 +1,9 @@
 #ifndef I2C_INTERFACE_H
 #define I2C_INTERFACE_H
 
+extern "C" {
 #include <stdint.h>
 #include <stddef.h>
-extern "C" {
 #include <ti/drv/i2c/i2c.h>
 #include <ti/drv/i2c/soc/i2c_soc.h>
 }
@@ -18,8 +18,10 @@ class C_I2C {
         C_I2C() = default;
         ~C_I2C() = default;
 
-        bool init(uint32 instance);
+        bool preinit(uint32 instance);
+        bool init(uint32 instance, uint32 bitRate);
         bool writeRegSingletVal(uint8 dev_addr, const uint8 *reg_n_data);
+        // bool rw(uint32 dev_addr, uint8 regAddr, uint8 *regData, uint8 size);
         bool rw(uint8 dev_addr, const uint8 *wbuffer, size_t wsize, uint8 *rbuffer, size_t rsize);
 
         I2C_Handle &getHandler();
