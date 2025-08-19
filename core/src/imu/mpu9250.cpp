@@ -7,10 +7,10 @@
 extern "C" {
 #include <ti/csl/csl_types.h>
 #include <ti/csl/csl_utils.h>
-#include <ti/drv/uart/UART.h>
-#include <ti/drv/uart/UART_stdio.h>
 #include <ti/drv/i2c/i2c.h>
 #include <ti/drv/i2c/soc/i2c_soc.h>
+#include <ti/drv/uart/UART.h>
+#include <ti/drv/uart/UART_stdio.h>
 }
 
 namespace imu {
@@ -46,7 +46,7 @@ bool C_IMU::init() {
   UART_printf("[DEBUG]: Clock source...[ SETTING ]\r\n");
   reg_n_data[0] = MPU9250_SMPRT_DIV;
   reg_n_data[1] = 4;
-  if (//!m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
+  if ( //! m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
       !m_i2cHandler.rw(MPU9250_ADDRESS, &reg_n_data[0], 1, &temp, 1) ||
       temp != 4) {
     UART_printf("[DEBUG]: Clock source...[ FAILED ]\r\n");
@@ -141,7 +141,8 @@ bool C_IMU::init() {
   // --- Magnetometer (AK8963) ---
   // Check AK8963 WHO_AM_I
   UART_printf("[DEBUG]: MAG WHO_AM_I...[ CHECKING ]\r\n");
-  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &MPU9250_AK8963_DEVICE_ID, 1, &temp, 1) ||
+  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &MPU9250_AK8963_DEVICE_ID, 1, &temp,
+                       1) ||
       temp != 0x48) {
     UART_printf("[DEBUG]: MAG WHO_AM_I...[ FAILED ]: 0x%02X\r\n", temp);
     return false;
@@ -164,9 +165,12 @@ bool C_IMU::init() {
     UART_printf("[DEBUG]: MAG ASA read...[ FAILED ]\r\n");
     return false;
   }
-  m_rawData.mag_adjustment[0] = ((buffer[0] - 128) * 0.5 / 128.0) + 1.0;  // X-axis
-  m_rawData.mag_adjustment[1] = ((buffer[1] - 128) * 0.5 / 128.0) + 1.0;  // Y-axis 
-  m_rawData.mag_adjustment[2] = ((buffer[2] - 128) * 0.5 / 128.0) + 1.0;  // Z-axis
+  m_rawData.mag_adjustment[0] =
+      ((buffer[0] - 128) * 0.5 / 128.0) + 1.0; // X-axis
+  m_rawData.mag_adjustment[1] =
+      ((buffer[1] - 128) * 0.5 / 128.0) + 1.0; // Y-axis
+  m_rawData.mag_adjustment[2] =
+      ((buffer[2] - 128) * 0.5 / 128.0) + 1.0; // Z-axis
 
   // Reset mag
   UART_printf("[DEBUG]: MAG reset..[ SETTING ]\r\n");
@@ -207,8 +211,10 @@ bool C_IMU::update() {
 
   // Gyro
   m_rawData.gx = static_cast<float64>((sint16)((rbuffer[8] << 8) | rbuffer[9]));
-  m_rawData.gy = static_cast<float64>((sint16)((rbuffer[10] << 8) | rbuffer[11]));
-  m_rawData.gz = static_cast<float64>((sint16)((rbuffer[12] << 8) | rbuffer[13]));
+  m_rawData.gy =
+      static_cast<float64>((sint16)((rbuffer[10] << 8) | rbuffer[11]));
+  m_rawData.gz =
+      static_cast<float64>((sint16)((rbuffer[12] << 8) | rbuffer[13]));
 
   // Temp
   sint16 temp_raw = (rbuffer[6] << 8) | rbuffer[7];
@@ -216,13 +222,16 @@ bool C_IMU::update() {
 
   // Mag
   uint8 status1;
-  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &MPU9250_MAG_STATUS_1, 1, &status1, 1)) {
+  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &MPU9250_MAG_STATUS_1, 1, &status1,
+                       1)) {
     UART_printf("Failed to read AK8963 status1\r\n");
     return false;
   }
   if (!(status1 & 0x01)) {
     UART_printf("Magnetometer data not ready\r\n");
-    m_rawData.mag_rdy = false;    // will flag data was not changed from one reading of the IMU to the next (mag -> 100Hz others -> 200Hz)
+    m_rawData.mag_rdy =
+        false; // will flag data was not changed from one reading of the IMU to
+               // the next (mag -> 100Hz others -> 200Hz)
     return true;
   }
 
@@ -238,9 +247,12 @@ bool C_IMU::update() {
     return false;
   }
 
-  m_rawData.mx = static_cast<float64>((sint16)((mag_data[1] << 8) | mag_data[0]));
-  m_rawData.my = static_cast<float64>((sint16)((mag_data[3] << 8) | mag_data[2]));
-  m_rawData.mz = static_cast<float64>((sint16)((mag_data[5] << 8) | mag_data[4]));
+  m_rawData.mx =
+      static_cast<float64>((sint16)((mag_data[1] << 8) | mag_data[0]));
+  m_rawData.my =
+      static_cast<float64>((sint16)((mag_data[3] << 8) | mag_data[2]));
+  m_rawData.mz =
+      static_cast<float64>((sint16)((mag_data[5] << 8) | mag_data[4]));
 
   m_rawData.mag_rdy = true;
 

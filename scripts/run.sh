@@ -160,11 +160,12 @@ buildCustomSW() {
         gracefull_exit -3
     fi
 
-    bitbake -ccleansstate linux-bb.org
+    # bitbake -ccleansstate linux-bb.org
     # bitbake -ccleansstate env-init
     # bitbake -ccleansstate firmwares
-    bitbake linux-bb.org
-    # bitbake firmware-image
+    # bitbake linux-bb.org
+    bitbake firmware-image
+    # bitbake firmwares
 
     if [ $? -ne 0 ]; then
         echo "Failed to build the project."

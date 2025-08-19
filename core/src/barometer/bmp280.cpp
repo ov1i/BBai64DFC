@@ -1,254 +1,138 @@
-#include "imu/mpu9250.h"
+#include "barometer/bmp280.h"
 #include "i2c/i2c_helper.h"
 #include <cstring>
 #include <dfc_types.h>
 #include <utils.h>
+#include <cmath>
 
 extern "C" {
 #include <ti/csl/csl_types.h>
 #include <ti/csl/csl_utils.h>
-#include <ti/drv/uart/UART.h>
-#include <ti/drv/uart/UART_stdio.h>
 #include <ti/drv/i2c/i2c.h>
 #include <ti/drv/i2c/soc/i2c_soc.h>
+#include <ti/drv/uart/UART.h>
+#include <ti/drv/uart/UART_stdio.h>
 }
 
-namespace imu {
-C_IMU::C_IMU() {
-  memset(&m_rawData, 0, sizeof(m_rawData));
-  memset(&m_i2cHandler, 0, sizeof(m_i2cHandler));
-  m_i2cState = false;
+
+namespace baro {
+
+C_BMP280::C_BMP280() { 
+    std::memset(this, 0, sizeof(*this)); 
 }
 
-bool C_IMU::init() {
+bool C_BMP280::init() {
   if (!m_i2cState) {
-    m_i2cState = m_i2cHandler.init(6, I2C_400kHz);
+    m_i2cState = m_i2cHandler.init(4, I2C_400kHz);
     if (!m_i2cState) {
       return false;
     }
   }
 
-  uint8 reg_n_data[2] = {0, 0};
-  uint8 temp = 0;
-  uint8 buffer[3] = {0, 0, 0};
+  uint8 temp[2] = { BMP280_RST_REG , 0xB6 };
+  m_i2cHandler.writeRegSingletVal(BMP280_ADDRESS, temp);
 
-  // Check MPU WHO_AM_I
-  UART_printf("[DEBUG]: WHO_AM_I...[ CHECKING ]\r\n");
-  if (!m_i2cHandler.rw(MPU9250_ADDRESS, &MPU9250_WHO_AM_I_GENERAL, 1, &temp,
-                       1) ||
-      temp != 0x71) {
-    UART_printf("[DEBUG]: WHO_AM_I... [ FAILED ]: 0x%02X\r\n", temp);
-    return false;
-  }
-  UART_printf("[DEBUG]: WHO_AM_I...[ SUCCESS ]: %\r\n", temp);
-
-  // Set G+A sample rate divider = 4
-  UART_printf("[DEBUG]: Clock source...[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_SMPRT_DIV;
-  reg_n_data[1] = 4;
-  if (//!m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
-      !m_i2cHandler.rw(MPU9250_ADDRESS, &reg_n_data[0], 1, &temp, 1) ||
-      temp != 4) {
-    UART_printf("[DEBUG]: Clock source...[ FAILED ]\r\n");
-    return false;
-  }
-  UART_printf("[DEBUG]: Clock source...[ SUCCESS ]\r\n");
-
-  // Set clock to X gyro
-  UART_printf("[DEBUG]: Clock source...[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_PWR_MGMNT_1;
-  reg_n_data[1] = 0x01;
-  if (!m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
-      !m_i2cHandler.rw(MPU9250_ADDRESS, &reg_n_data[0], 1, &temp, 1) ||
-      temp != 1) {
-    UART_printf("[DEBUG]: Clock source...[ FAILED ]\r\n");
-    return false;
-  }
-  UART_printf("[DEBUG]: Clock source...[ SUCCESS ]\r\n");
-
-  // Accelerometer scale = ±4g (0x08)
-  UART_printf("[DEBUG]: Acc scale...[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_ACC_CONFIG_1;
-  reg_n_data[1] = 0x08;
-  if (!m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
-      !m_i2cHandler.rw(MPU9250_ADDRESS, &reg_n_data[0], 1, &temp, 1) ||
-      temp != 8) {
-    UART_printf("[DEBUG]: Acc scale...[ FAILED ]\r\n");
-    return false;
-  }
-  UART_printf("[DEBUG]: Acc scale...[ SUCCESS ]\r\n");
-
-  // Gyroscope scale = ±500 dps (0x08)
-  UART_printf("[DEBUG]: Gyro scale...[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_GYRO_CONFIG;
-  reg_n_data[1] = 0x08;
-  if (!m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
-      !m_i2cHandler.rw(MPU9250_ADDRESS, &reg_n_data[0], 1, &temp, 1) ||
-      temp != 8) {
-    UART_printf("[DEBUG]: Gyro scale...[ FAILED ]\r\n");
-    return false;
-  }
-  UART_printf("[DEBUG]: Gyro scale...[ SUCCESS ]\r\n");
-
-  // Low-pass filter for acc (10Hz, 0x05)
-  UART_printf("[DEBUG]: Acc LPF...[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_ACC_CONFIG_2;
-  reg_n_data[1] = 0x05;
-  if (!m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
-      !m_i2cHandler.rw(MPU9250_ADDRESS, &reg_n_data[0], 1, &temp, 1) ||
-      temp != 5) {
-    UART_printf("[DEBUG]: Acc LPF...[ FAILED ]\r\n");
-    return false;
-  }
-  UART_printf("[DEBUG]: Acc LPF...[ SUCCESS ]\r\n");
-
-  // Low-pass filter for gyro (10Hz, 0x05)
-  UART_printf("[DEBUG]: Gyro LPF...[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_CONFIG;
-  reg_n_data[1] = 0x05;
-  if (!m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
-      !m_i2cHandler.rw(MPU9250_ADDRESS, &reg_n_data[0], 1, &temp, 1) ||
-      temp != 5) {
-    UART_printf("[DEBUG]: Gyro LPF...[ FAILED ]\r\n");
-    return false;
-  }
-  UART_printf("[DEBUG]: Gyro LPF...[ SUCCESS ]\r\n");
-
-  // Disable I2C master (enable bypass to AK8963 mag)
-  UART_printf("[DEBUG]: I2C master disable...[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_USER_CTRL;
-  reg_n_data[1] = 0x00;
-  if (!m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
-      !m_i2cHandler.rw(MPU9250_ADDRESS, &reg_n_data[0], 1, &temp, 1) ||
-      temp != 0) {
-    UART_printf("[DEBUG]: I2C master disable...[ FAILED ]\r\n");
-    return false;
-  }
-  UART_printf("[DEBUG]: I2C master disable...[ SUCCESS ]\r\n");
-
-  // Enable bypass multiplexer
-  UART_printf("[DEBUG]: Bypass enable...[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_INT_PIN_CONFIG;
-  reg_n_data[1] = 0x02;
-  if (!m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
-      !m_i2cHandler.rw(MPU9250_ADDRESS, &reg_n_data[0], 1, &temp, 1) ||
-      temp != 2) {
-    UART_printf("[DEBUG]: Bypass enable...[ FAILED ]\r\n");
-    return false;
-  }
-  UART_printf("[DEBUG]: Bypass enable...[ SUCCESS ]\r\n");
-
-  // --- Magnetometer (AK8963) ---
-  // Check AK8963 WHO_AM_I
-  UART_printf("[DEBUG]: MAG WHO_AM_I...[ CHECKING ]\r\n");
-  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &MPU9250_AK8963_DEVICE_ID, 1, &temp, 1) ||
-      temp != 0x48) {
-    UART_printf("[DEBUG]: MAG WHO_AM_I...[ FAILED ]: 0x%02X\r\n", temp);
-    return false;
-  }
-  UART_printf("[DEBUG]: MAG WHO_AM_I...[ SUCCESS ]: 0x%02X\r\n", temp);
-
-  // Enter Fuse ROM access mode (for sensitivity adjustment)
-  UART_printf("[DEBUG]: MAG Fuse ROM...[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_MAG_CONTROL_CONFIG;
-  reg_n_data[1] = 0x0F;
-  if (!m_i2cHandler.writeRegSingletVal(MPU9250_AK8963_ADDR, reg_n_data)) {
-    UART_printf("[DEBUG]: MAG Fuse ROM...[ FAILED ]\r\n");
+  if (!updateInternalCalib()) {
+    UART_printf("[BMP280] Calib read FAILED\r\n");
     return false;
   }
 
-  // Read sensitivity adjustment values
-  UART_printf("[DEBUG]: MAG ASA read...[ SETTING ]\r\n");
-  uint8 asax_reg = MPU9250_MAG_ASAX_CONFIG;
-  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &asax_reg, 1, buffer, 3)) {
-    UART_printf("[DEBUG]: MAG ASA read...[ FAILED ]\r\n");
-    return false;
-  }
-  m_rawData.mag_adjustment[0] = ((buffer[0] - 128) * 0.5 / 128.0) + 1.0;  // X-axis
-  m_rawData.mag_adjustment[1] = ((buffer[1] - 128) * 0.5 / 128.0) + 1.0;  // Y-axis 
-  m_rawData.mag_adjustment[2] = ((buffer[2] - 128) * 0.5 / 128.0) + 1.0;  // Z-axis
-
-  // Reset mag
-  UART_printf("[DEBUG]: MAG reset..[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_MAG_CONTROL_CONFIG;
-  reg_n_data[1] = 0x00;
-  if (!m_i2cHandler.writeRegSingletVal(MPU9250_AK8963_ADDR, reg_n_data)) {
-    UART_printf("[DEBUG]: MAG reset...[ FAILED ]\r\n");
+  // 0x10h : t_sb=0.5ms(000), filter=16(100), spi3w=0
+  temp[0] = BMP280_CONFIG_REG;
+  temp[1] = 0x10;
+  if (!m_i2cHandler.writeRegSingletVal(BMP280_ADDRESS, temp)) {
+    UART_printf("[BMP280] Config setting FAILED\r\n");
     return false;
   }
 
-  // Continuous mode 2 (100Hz, 16-bit)
-  UART_printf("[DEBUG]: MAG continuous mode...[ SETTING ]\r\n");
-  reg_n_data[0] = MPU9250_MAG_CONTROL_CONFIG;
-  reg_n_data[1] = 0x16;
-  if (!m_i2cHandler.writeRegSingletVal(MPU9250_AK8963_ADDR, reg_n_data)) {
-    UART_printf("[DEBUG]: MAG continuous mode...[ FAILED ]\r\n");
+  // 0x33h : osrs_t=1(1), osrs_p=4(100), mode=normal(11)
+  temp[0] = BMP280_CTRL_MES_REG;
+  temp[1] = 0x33;
+  if (!m_i2cHandler.writeRegSingletVal(BMP280_ADDRESS, temp)) {
+    UART_printf("[BMP280] Setting of the ctrl_meas FAILED\r\n");
     return false;
   }
 
-  UART_printf("[DEBUG]: MPU9250 init complete!\r\n");
+  UART_printf("[BMP280] Init OK");
   return true;
 }
 
-bool C_IMU::update() {
-  uint8 wbuffer[1] = {MPU9250_ACC_X_H};
-  uint8 rbuffer[14] = {0};
-
-  // Read 14 bytes: accel (6), gyro (6), temp (2)
-  if (!m_i2cHandler.rw(MPU9250_ADDRESS, &wbuffer[0], 1, &rbuffer[0], 14)) {
-    UART_printf("Failed to read data from MPU9250\r\n");
+bool C_BMP280::update() {
+  uint8 tempBuffer[6];
+  if (!m_i2cHandler.rw(BMP280_ADDRESS, &BMP280_PMSB_DATA_REGISTER, 1, tempBuffer, 6)) {
+    UART_printf("[BMP280] read FAILED\r\n");
     return false;
   }
-
-  // Accel
-  m_rawData.ax = static_cast<float64>((sint16)((rbuffer[0] << 8) | rbuffer[1]));
-  m_rawData.ay = static_cast<float64>((sint16)((rbuffer[2] << 8) | rbuffer[3]));
-  m_rawData.az = static_cast<float64>((sint16)((rbuffer[4] << 8) | rbuffer[5]));
-
-  // Gyro
-  m_rawData.gx = static_cast<float64>((sint16)((rbuffer[8] << 8) | rbuffer[9]));
-  m_rawData.gy = static_cast<float64>((sint16)((rbuffer[10] << 8) | rbuffer[11]));
-  m_rawData.gz = static_cast<float64>((sint16)((rbuffer[12] << 8) | rbuffer[13]));
-
-  // Temp
-  sint16 temp_raw = (rbuffer[6] << 8) | rbuffer[7];
-  m_rawData.temp = static_cast<float64>(temp_raw);
-
-  // Mag
-  uint8 status1;
-  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &MPU9250_MAG_STATUS_1, 1, &status1, 1)) {
-    UART_printf("Failed to read AK8963 status1\r\n");
-    return false;
-  }
-  if (!(status1 & 0x01)) {
-    UART_printf("Magnetometer data not ready\r\n");
-    m_rawData.mag_rdy = false;    // will flag data was not changed from one reading of the IMU to the next (mag -> 100Hz others -> 200Hz)
-    return true;
-  }
-
-  // Read 7 bytes: data(6), status2(1))
-  uint8 mag_data[7] = {0};
-  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &MPU9250_MAG_X_L, 1, mag_data, 7)) {
-    UART_printf("Failed to read AK8963 mag data\r\n");
-    return false;
-  }
-
-  if (mag_data[6] & 0x08) {
-    UART_printf("Magnetometer overflow!\r\n");
-    return false;
-  }
-
-  m_rawData.mx = static_cast<float64>((sint16)((mag_data[1] << 8) | mag_data[0]));
-  m_rawData.my = static_cast<float64>((sint16)((mag_data[3] << 8) | mag_data[2]));
-  m_rawData.mz = static_cast<float64>((sint16)((mag_data[5] << 8) | mag_data[4]));
-
-  m_rawData.mag_rdy = true;
-
+  sint32 rawPressure = (sint32)((tempBuffer[0] << 12) | (tempBuffer[1] << 4) | (tempBuffer[2] >> 4));
+  sint32 rawTemp = (sint32)((tempBuffer[3] << 12) | (tempBuffer[4] << 4) | (tempBuffer[5] >> 4));
+  internalValCompensation(rawTemp, rawPressure);
+  computeAltitude();
   return true;
 }
 
-void C_IMU::getCurrentRawData(DFC_t_MPU9250_Data *rawData) {
-  rawData = &m_rawData;
+bool C_BMP280::updateInternalCalibReg() {
+  uint8 tempBuffer[24];
+  if (!m_i2cHandler.rw(BMP280_ADDRESS, &BMP280_T1_CALIB_ADDR, 1, tempBuffer, sizeof(tempBuffer)))
+    return false;
+
+  m_data.calibration_data.dig_T1 = (uint16)(tempBuffer[1] << 8 | tempBuffer[0]);
+  m_data.calibration_data.dig_T2 = (sint16)(tempBuffer[3] << 8 | tempBuffer[2]);
+  m_data.calibration_data.dig_T3 = (sint16)(tempBuffer[5] << 8 | tempBuffer[4]);
+  m_data.calibration_data.dig_P1 = (uint16)(tempBuffer[7] << 8 | tempBuffer[6]);
+  m_data.calibration_data.dig_P2 = (sint16)(tempBuffer[9] << 8 | tempBuffer[8]);
+  m_data.calibration_data.dig_P3 = (sint16)(tempBuffer[11] << 8 | tempBuffer[10]);
+  m_data.calibration_data.dig_P4 = (sint16)(tempBuffer[13] << 8 | tempBuffer[12]);
+  m_data.calibration_data.dig_P5 = (sint16)(tempBuffer[15] << 8 | tempBuffer[14]);
+  m_data.calibration_data.dig_P6 = (sint16)(tempBuffer[17] << 8 | tempBuffer[16]);
+  m_data.calibration_data.dig_P7 = (sint16)(tempBuffer[19] << 8 | tempBuffer[18]);
+  m_data.calibration_data.dig_P8 = (sint16)(tempBuffer[21] << 8 | tempBuffer[20]);
+  m_data.calibration_data.dig_P9 = (sint16)(tempBuffer[23] << 8 | tempBuffer[22]);
+  
+  return true;
 }
 
-} // namespace imu
+void C_BMP280::internalValCompensation(sint32 rawTempData, sint32 rawPressureData) {
+  // temperature
+  sint32 var1 = ((((rawTempData >> 3) - ((sint32)m_data.calibration_data.dig_T1 << 1))) * ((sint32)m_data.calibration_data.dig_T2)) >> 11;
+  sint32 var2 = (((((rawTempData >> 4) - ((sint32)m_data.calibration_data.dig_T1)) * ((rawTempData >> 4) - ((sint32)m_data.calibration_data.dig_T1))) >> 12) *
+                 ((sint32)m_data.calibration_data.dig_T3)) >> 14;
+  sint32 fineResolution = var1 + var2;
+  sint32 processedTemp = (fineResolution * 5 + 128) >> 8; // 0.01 C
+  m_data.temp = (float64)T / 100.0;
+
+  // pressure
+  sint64 var1p = ((sint64)fineResolution) - 128000;
+  sint64 var2p = var1p * var1p * (sint64)m_data.calibration_data.dig_P6;
+  var2p = var2p + ((var1p * (sint64)m_data.calibration_data.dig_P5) << 17);
+  var2p = var2p + (((sint64)m_data.calibration_data.dig_P4) << 35);
+  var1p =
+      ((var1p * var1p * (sint64)m_data.calibration_data.dig_P3) >> 8) + ((var1p * (sint64)m_data.calibration_data.dig_P2) << 12);
+  var1p = (((((sint64)1) << 47) + var1p)) * ((sint64)m_data.calibration_data.dig_P1) >> 33;
+  if (var1p == 0) {
+    m_data.pressure = 0.0;
+    return;
+  }
+
+  sint64 processedPress = 1048576 - rawPressureData;
+  processedPress = (((p << 31) - var2p) * 3125) / var1p;
+  var1p = (((sint64)m_data.calibration_data.dig_P9) * (processedPress >> 13) * (processedPress >> 13)) >> 25;
+  var2p = (((sint64)m_data.calibration_data.dig_P8) * processedPress) >> 19;
+  processedPress = ((processedPress + var1p + var2p) >> 8) + (((sint64)m_data.calibration_data.dig_P7) << 4);
+  m_data.pressure = (float64)processedPress / 256.0; // Q24.8 → Pa
+}
+
+void C_BMP280::computeAltitude() {
+  // h = 44330 * (1 - (P/P0)^(1/5.255))
+  if (m_data.gnd.P0 <= 0) {
+    m_data.altitude = 0.0;
+    return;
+  }
+  float64 ratio = m_data.pressure / m_data.gnd.P0;
+  if (ratio <= 0.0) {
+    m_data.altitude = 0.0;
+    return;
+  }
+  m_data.altitude = 44330.0 * (1.0 - std::pow(ratio, 0.1902949572));
+}
+
+} // namespace baro

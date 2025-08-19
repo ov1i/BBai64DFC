@@ -12,6 +12,8 @@ systemd \
 systemd-networkd \
 systemd-analyze \
 i2c-tools \
+strace \
+iproute2 \
 network-remote-init \
 xz \
 ti-ipc \

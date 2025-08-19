@@ -66,7 +66,7 @@ bool C_I2C::preinit(uint32 instance) {
   return true;
 }
 
-bool C_I2C::init(uint32 instance, uint32 bitRate) {
+bool C_I2C::init(uint32 instance, I2C_BitRate bitRate) {
   I2C_Params i2cParams;
 
   /// TODO: Add checks for I2C occupied by other core/task
