@@ -19,7 +19,7 @@ class C_I2C {
         ~C_I2C() = default;
 
         bool preinit(uint32 instance);
-        bool init(uint32 instance, uint32 bitRate);
+        bool init(uint32 instance, I2C_BitRate bitRate);
         bool writeRegSingletVal(uint8 dev_addr, const uint8 *reg_n_data);
         // bool rw(uint32 dev_addr, uint8 regAddr, uint8 *regData, uint8 size);
         bool rw(uint8 dev_addr, const uint8 *wbuffer, size_t wsize, uint8 *rbuffer, size_t rsize);

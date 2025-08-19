@@ -67,12 +67,6 @@ void initTask(void *arg0, void *arg1) {
         UART_printf("Y2 pin fetched and checks failed..\r\n");
     }
 
-    if(boardStatus != BOARD_SOK) {
-        UART_printf("Board init failed! Please restart the board...\r\n");
-    } else {
-        UART_printf("Board initialization was succesful!\r\n");
-    }
-
     // logger_init();
     while(pImuOBJ == NULL) {
         UART_printf("Imu object corrupted...checkup required!\r\n");

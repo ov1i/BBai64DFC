@@ -2,17 +2,22 @@ SUMMARY = "Install Custom firmwares"
 LICENSE = "CLOSED"
 PR = "r1"
 
+inherit cmake externalsrc
+
 do_fetch[noexec] = "1"
 INHIBIT_PACKAGE_ARCH = "1"
 INSANE_SKIP:${PN} += "arch"
 
+EXTERNALSRC = "${TOPDIR}/../core_a72"
+EXTERNALSRC_BUILD = "${WORKDIR}/build"
+EXTERNALSRC_SYMLINKS = " "
 
 FIRMWARE_SRC_PATH := " \
 ${TOPDIR}/firmwares/dfc_app/bin/j721e_evm/dfc_app_mcu2_0_release.xer5f \
 ${TOPDIR}/firmwares/dfc_app/bin/j721e_evm/dfc_app_mcu2_0_release_strip.xer5f \
 "
 
-do_install() {
+do_install:append() {
     install -d ${D}${nonarch_base_libdir}/firmware/ti-eth/j721e
 
     install -m 0644 ${FIRMWARE_SRC_PATH} ${D}${nonarch_base_libdir}/firmware/ti-eth/j721e

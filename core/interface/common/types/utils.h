@@ -62,6 +62,13 @@ const uint8  MPU9250_MAG_Y_H =               0x06;
 const uint8  MPU9250_MAG_Z_L =               0x07;
 const uint8  MPU9250_MAG_Z_H =               0x08;
 
+const uint8  BMP280_ADDRESS =                0x76;
+const uint8  BMP280_RST_REG =                0xE0;
+const uint8  BMP280_CTRL_MES_REG =           0xF4;
+const uint8  BMP280_CONFIG_REG =             0xF5;
+const uint8  BMP280_T1_CALIB_ADDR =          0x88;
+const uint8  BMP280_PMSB_DATA_REGISTER =     0xF7;
+
 const float32 accel_scale = 16384.0F;
 const float32 gyro_scale = 131.0F;
 const float64 deg_2_rad_cst = 0.017453292519943295;
