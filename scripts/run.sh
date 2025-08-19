@@ -25,75 +25,71 @@ clean_artifacts_lite() {
     fi
     echo "Build cleanup finished.."
 }
+sync() {
+    SDK_URL="https://dr-download.ti.com/software-development/software-development-kit-sdk/MD-bA0wfI4X2g/11.00.00.06/ti-processor-sdk-rtos-j721e-evm-11_00_00_06.tar.gz"
+    SDK_ARCHIVE="${SDK_URL##*/}"
+    DOWNLOADS_DIR="$HOME/Downloads"
+    EXTRACT_DIR="$HOME/ti"
+    PATCH_VAR="TOOLS_INSTALL_PATH ?="
+    PATCH_VAL="\$(HOME)/ti"
 
-# flash_sw() {
-#     echo "FLASH proccess started.."
-#     st-flash --reset write ${PWD}/.build/DFC.bin 0x08000000
-#     if [ $? -ne 0 ]; then
-#         echo "FLASH process failed! Cleanup started"
-#         st-flash --reset erase
-#         if [ $? -ne 0 ]; then
-#             echo "Cleanup failed please check the SW before reflashing!"
-#         fi
-#         gracefull_exit -7
-#     fi
+    mkdir -p "$DOWNLOADS_DIR"
+    cd "$DOWNLOADS_DIR"
+    if [ ! -f "$SDK_ARCHIVE" ]; then
+        echo "Downloading SDK: $SDK_URL ..."
+        if command -v wget >/dev/null 2>&1; then
+            wget "$SDK_URL"
+        elif command -v curl >/dev/null 2>&1; then
+            curl -LO "$SDK_URL"
+        else
+            echo "Neither wget nor curl found!"
+            gracefull_exit -1
+        fi
+    else
+        echo "SDK archive already downloaded."
+    fi
 
-#     echo "Veryfing flash.."
-#     size=$(stat --format=%s ${PWD}/.build/DFC.bin)
-#     st-flash read ${PWD}/.build/verify.bin 0x08000000 $size
-#     if [ $? -ne 0 ]; then
-#         echo "Failed reading the flash from the board! Please check connectivity of the board!"
-#         gracefull_exit -7
-#     fi
+    mkdir -p "$EXTRACT_DIR"
+    cd "$EXTRACT_DIR"
+    if [[ "$SDK_ARCHIVE" == *.tar.xz ]]; then
+        tar -xJf "$DOWNLOADS_DIR/$SDK_ARCHIVE"
+    elif [[ "$SDK_ARCHIVE" == *.tar.gz ]]; then
+        tar -xzf "$DOWNLOADS_DIR/$SDK_ARCHIVE"
+    elif [[ "$SDK_ARCHIVE" == *.zip ]]; then
+        unzip "$DOWNLOADS_DIR/$SDK_ARCHIVE"
+    else
+        echo "Unknown SDK archive format."
+        gracefull_exit -1
+    fi
 
-#     if ! cmp -s ${PWD}/.build/verify.bin ${PWD}/.build/DFC.bin; then
-#         echo "Found discrepancy between the local SW and the flash result. SW corrupted!"
-#         echo "Cleanup started.."
-#         st-flash --reset erase
-#         if [ $? -ne 0 ]; then
-#             echo "Cleanup failed!"
-#         fi
-#         gracefull_exit -7
-#     fi
-#     if [ $? -ne 0 ]; then
-#         echo "Verifying failed..Cleanup started! (safety mechanism)"
-#         st-flash --reset erase
-#         if [ $? -ne 0 ]; then
-#             echo "Cleanup failed!"
-#         fi
-#         gracefull_exit -7
-#     fi
-#     echo "SW flashed succesfully!"
-# }
+    SDK_TOP=$(find "$EXTRACT_DIR" -maxdepth 1 -type d -name "ti-processor-sdk-rtos-*" | head -n1)
+    if [ -z "$SDK_TOP" ]; then
+        echo "Extracted SDK directory not found!"
+        gracefull_exit -1
+    fi
+    echo "SDK extracted to: $SDK_TOP"
 
-# check_board_connectivity() {
-#     echo "Checking board connectivity.."
+    cd "$SDK_TOP"
+    if [ -f "./sdk_builder/scripts/setup_psdk_rtos.sh" ]; then
+        echo "Running toolchain setup script..."
+        bash ./sdk_builder/scripts/setup_psdk_rtos.sh --qnx_sbl --firmware_only --skip_pc_emulation --skip_atf_optee --skip_linux
+    else
+        echo "Toolchain setup script not found!"
+        gracefull_exit -1
+    fi
 
-#     status="$(st-info --probe)"
+    PDK_BUILD_RULES="$SDK_TOP/pdk_jacinto_11_00_00_21/packages/ti/build/Rules.make"
+    if [ -f "$PDK_BUILD_RULES" ]; then
+        sed -i "s|^$PATCH_VAR.*|$PATCH_VAR $PATCH_VAL|" "$PDK_BUILD_RULES"
+        echo "Patched $PDK_BUILD_RULES"
+    else
+        echo "Could not find $PDK_BUILD_RULES to patch!"
+    fi
 
-#     if echo "$status" | grep -q "chipid:     0x451" && echo "$status" | grep -q "dev-type:   STM32F76x_F77x"; then
-#         echo "STM32 board detected!"
-#     else
-#         echo "STM32 board not found!"
-#         gracefull_exit -6
-#     fi
+    echo "SDK ready in $SDK_TOP"
+}
 
-# }
-# check_sw_existance() {
-#     echo "Checking build existance.."
-#     if [ -d ".build" ]; then
-#         echo "Build found continuing.."
-#         if [ -f "${PWD}/.build/DFC.bin" ]; then
-#             echo "SW found, continuing.."
-#         else
-#             echo "SW not found, please check the existance of the target or rebuild the project!"
-#             gracefull_exit -5
-#         fi
-#     else
-#         echo "Build not found, board flash failed!"
-#         gracefull_exit -5
-#     fi
-# }   
+
 
 gracefull_exit() {
     echo "Logs generated succesfully, exiting with code $1."
@@ -137,20 +133,9 @@ submodule_check() {
     echo -e "All submodules are up to date!\n"
 }
 
-# compileProject() {
-#     echo "Compilation started.."
-#     cmake . -B.build -GNinja -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_BUILD_TYPE=debug -DCMAKE_TOOLCHAIN_FILE=cmake/tc_utils.cmake -DDUMP_ASM=OFF
-#     if [ $? -ne 0 ]; then
-#         echo "Failed to compile the source code."
-#         gracefull_exit -3
-#     fi
-#     echo "Compilation succesful.."
-# }
-
-buildProject() {
+buildFactory() {
     echo "Building started.."
     sudo bash -c 'echo 0 > /proc/sys/kernel/apparmor_restrict_unprivileged_userns'
-    # export TEMPLATECONF="${PWD}/core/conf"
     export TEMPLATECONF="${PWD}/bbai64_os/conf/templates/custom"
     source deps/poky/oe-init-build-env .build
     if [ $? -ne 0 ]; then
@@ -158,16 +143,114 @@ buildProject() {
         gracefull_exit -3
     fi
 
-    # bitbake -c menuconfig u-boot-ti-staging
-    bitbake -ccleansstate env-init
-    bitbake dfc-factory-image
+    bitbake factory-image
     if [ $? -ne 0 ]; then
         echo "Failed to build the project."
         gracefull_exit -3
     fi
 }
 
-buildProjectDocker() {
+buildCustomSW() {
+    echo "Building started.."
+    sudo bash -c 'echo 0 > /proc/sys/kernel/apparmor_restrict_unprivileged_userns'
+    export TEMPLATECONF="${PWD}/bbai64_os/conf/templates/custom"
+    source deps/poky/oe-init-build-env .build
+    if [ $? -ne 0 ]; then
+        echo "Failed to build the project."
+        gracefull_exit -3
+    fi
+
+    # bitbake -ccleansstate linux-bb.org
+    # bitbake -ccleansstate env-init
+    # bitbake -ccleansstate firmwares
+    # bitbake linux-bb.org
+    bitbake firmware-image
+    # bitbake firmwares
+
+    if [ $? -ne 0 ]; then
+        echo "Failed to build the project."
+        gracefull_exit -3
+    fi
+}
+
+buildFirmwares() {
+    echo "Firmwares build started.."
+
+    PSDK_RTOS_PATH=$(find "$HOME/ti" -maxdepth 1 -type d -name "ti-processor-sdk-rtos-*" | head -n1)
+    PDK_PATH=$PSDK_RTOS_PATH/pdk_jacinto_11_00_00_21/packages
+    REPO_ROOT=${PWD}
+    APP_PATH=${PDK_PATH}/ti/drv/ipc/examples/DFC
+    MK_FILE="${APP_PATH}/DFC_component.mk"
+    BACKUP_SUFFIX=".bak"
+    BUILD_ERR=0
+
+    rm -rf $APP_PATH
+    cp -r $REPO_ROOT/core $APP_PATH
+    if [ $? -ne 0 ]; then
+        echo "Failed to build firmwares."
+        BUILD_ERR=-3
+    fi
+
+    if [ ! -f "${PDK_PATH}/ti/drv/ipc/ipc_component.mk${BACKUP_SUFFIX}" ]; then
+        cp "${PDK_PATH}/ti/drv/ipc/ipc_component.mk" "${PDK_PATH}/ti/drv/ipc/ipc_component.mk${BACKUP_SUFFIX}"
+    fi
+
+    cat "$MK_FILE" >> "${PDK_PATH}/ti/drv/ipc/ipc_component.mk"
+    if [ $? -ne 0 ]; then
+        echo "Failed to add the DFC_component to the list of buildables."
+        BUILD_ERR=-3
+    fi
+
+    cd $PDK_PATH/ti/build
+    gmake -S CORE=mcu2_0 OS=linux dfc_app
+    if [ $? -ne 0 ]; then
+        echo "Failed to build firmwares."
+        BUILD_ERR=-3
+    fi
+
+    # gmake -S pdk_libs
+    # if [ $? -ne 0 ]; then
+    #     echo "Failed to build firmwares."
+    #     BUILD_ERR=-3
+    # fi
+
+    if [ ! -d "$REPO_ROOT/.build/firmwares" ]; then
+        mkdir -p $REPO_ROOT/.build/firmwares
+    fi
+
+    cp -r "${PDK_PATH}/ti/binary/dfc_app" "${REPO_ROOT}/.build/firmwares"
+    if [ $? -ne 0 ]; then
+        echo "Failed to copy firmwares to the output dir please check the SDK/PDK binary dir."
+        BUILD_ERR=-3
+    fi
+
+    # gmake -S clean dfc_app
+    # if [ $? -ne 0 ]; then
+    #     echo "Failed to clear the binaries from the sdk.."
+    #     BUILD_ERR=-3
+    # fi
+
+    mv "${PDK_PATH}/ti/drv/ipc/ipc_component.mk${BACKUP_SUFFIX}" "${PDK_PATH}/ti/drv/ipc/ipc_component.mk"
+    if [ $? -ne 0 ]; then
+        echo "Failed to restore the sdk buildables list to its original form."
+        BUILD_ERR=-3
+    fi
+
+    rm -rf $APP_PATH
+    if [ $? -ne 0 ]; then
+        echo "Failed to restore sdk state to its original"
+        BUILD_ERR=-3
+    fi
+    
+    cd ${REPO_ROOT}
+
+    if [ $BUILD_ERR -ne 0 ]; then
+        gracefull_exit $BUILD_ERR
+    fi
+}
+
+
+buildFactoryDocker() {
     echo "CHU..CHU...Build is on it's wayy.."
     sudo bash -c 'echo 0 > /proc/sys/kernel/apparmor_restrict_unprivileged_userns'
     docker build -t core_low_container .
@@ -192,9 +275,11 @@ menuWrapper() {
    if [ $# -ne 1 ]; then
         echo "Usage: $0 [option] ..."
         echo -e "OPTIONS:"
-        echo -e "\t-build:\t Build and flash the board with the sw"
+        echo -e "\t-build:\t\t Build factory image"
+        echo -e "\t-buildi:\t Build custom sw image"
+        echo -e "\t-buildf:\t Build custom firmwares"
         echo -e "\t-buildexp:\t Build express (CHUCHU) via docker container"
-        echo -e "\t-flash:\t Flash the sw on the board"
+        echo -e "\t-sync:\t\t Sync the enviroment"
         echo -e "\t-btest:\t Build gtests for the sw"
         echo -e "\t-etest:\t Build and execute the gtests for the sw"
         echo -e "\t-liteclean:\t Clean build artifacts"
@@ -205,32 +290,24 @@ menuWrapper() {
 
     if [ "$1" == "-build" ] || [ "$1" == "-b" ]; then
         logger 1
-        # submodule_check
-        # compileProject
-        buildProject
+        buildFactory
+        gracefull_exit 1
+    elif [ "$1" == "-buildi" ] || [ "$1" == "-bi" ]; then
+        logger 1
+        buildFirmwares
+        buildCustomSW
+        gracefull_exit 1
+    elif [ "$1" == "-buildf" ] || [ "$1" == "-bf" ]; then
+        logger 1
+        buildFirmwares
         gracefull_exit 1
     elif [ "$1" == "-buildexp" ] || [ "$1" == "-be" ]; then
         logger 1
-        # submodule_check
-        # compileProject
-        buildProjectDocker
+        buildFactoryDocker
         gracefull_exit 1
-    elif [ "$1" == "-flash" ] ||  [ "$1" == "-f" ]; then
+    elif [ "$1" == "-sync" ] ||  [ "$1" == "-s" ]; then
         logger 1
-        # check_st_tools
-        # check_board_connectivity
-        # check_sw_existance
-        # flash_sw
-        gracefull_exit 1
-    elif [ "$1" == "-bflsh" ] ||  [ "$1" == "-bf" ]; then
-        logger 1
-        # submodule_check
-        # compileProject
-        # buildProject
-        # check_st_tools
-        # check_board_connectivity
-        # check_sw_existance
-        # flash_sw
+        sync
         gracefull_exit 1
     elif [ "$1" == "-fullclean" ] || [ "$1" == "-fc" ]; then
         logger 1
@@ -244,11 +321,11 @@ menuWrapper() {
         echo "Error: Invalid argument"
         echo "Usage: $0 [option] ..."
         echo -e "OPTIONS:"
-        echo -e "\t-build:\t Build and flash the board with the sw"
+        echo -e "\t-build:\t\t Build factory image"
+        echo -e "\t-buildi:\t Build custom sw image"
+        echo -e "\t-buildf:\t Build custom firmwares"
         echo -e "\t-buildexp:\t Build express (CHUCHU) via docker container"
-        echo -e "\t-flash:\t Flash the sw on the board"
-        echo -e "\t-btest:\t Build gtests for the sw"
-        echo -e "\t-etest:\t Build and execute the gtests for the sw"
+        echo -e "\t-sync:\t\t Sync the enviroment"
         echo -e "\t-liteclean:\t Clean build artifacts"
         echo -e "\t-fullclean:\t Clean build artifacts"
 

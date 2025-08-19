@@ -1,6 +1,6 @@
 CompileFlags:
     Compiler: arm-none-eabi-gcc  # Specific ARM GCC toolchain
-    CompilationDatabase: .build/
+    CompilationDatabase: .build/firmwares
     Add: 
         - -Wno-unknown-warning-option
         - -Wall
