@@ -161,8 +161,8 @@ buildCustomSW() {
     fi
 
     # bitbake -ccleansstate linux-bb.org
-    # bitbake -ccleansstate env-init
     # bitbake -ccleansstate firmwares
+    # bitbake -ccleansstate env-init
     # bitbake linux-bb.org
     bitbake firmware-image
     # bitbake firmwares

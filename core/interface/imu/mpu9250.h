@@ -22,7 +22,7 @@ namespace imu {
         void getCurrentRawData(DFC_t_MPU9250_Data *rawData);
 
     private:
-        DFC_t_MPU9250_Data m_rawData;
+        DFC_t_MPU9250_Data m_data;
         i2c::C_I2C m_i2cHandler;
         bool m_i2cState;
 };
