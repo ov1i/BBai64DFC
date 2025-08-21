@@ -173,7 +173,7 @@ void C_EKF::predict(const float64 gyro[3], const float64 acc[3], float64 dt) {
   mat15_add_Q(m_state.P, Qd);
   pin_P();
 
-  m_state.t_ns += (uint64_t)llround(dt * 1e9);
+  m_state.t_ns += (uint64)llround(dt * 1e9);
 }
 
 void C_EKF::inject_error(const float64 dx[15]) {
