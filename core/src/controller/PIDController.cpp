@@ -7,7 +7,8 @@ namespace ctrl {
 void C_PIDController::init(const DFC_t_PIDController_Params& params) {
   m_Params = params;
   m_State = DFC_t_PIDControllerState{};
-  motor_pwm::init(m_Params.pwm_min_us, m_Params.pwm_max_us);
+  /// TODO: MOVE TO INIT TASK
+  PWMgen::init();
 }
 
 float64 C_PIDController::apply_deadband_expo(float64 v, float64 deadband, float64 expo) {
@@ -317,8 +318,7 @@ void C_PIDController::attitude_outer(const DFC_t_EKF_State& ekfState,
   body_rate_sp[2] = constrain(body_rate_sp[2], -m_Params.rc_max_rate[2], m_Params.rc_max_rate[2]);
 }
 
-void Controller::rate_inner(const float64 body_rate_sp[3], const float64 gyro[3], float64 dt,
-                            float64 torque_cmd[3]) {
+void C_PIDController::rate_inner(const float64 body_rate_sp[3], const float64 gyro[3], float64 dt, float64 torque_cmd[3]) {
   m_State.motors_saturated = false; // reset will be set later
 
   for (uint8 i=0;i<3;i++) {
