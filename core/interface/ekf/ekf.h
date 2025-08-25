@@ -13,7 +13,7 @@ class C_EKF {
 public:
   C_EKF() = default;
 
-  void reset(uint64_t t0_ns);
+  void reset(uint64 t0_ns);
   void setParams(const DFC_t_EKF_Params &p) { m_params = p; }
   const DFC_t_EKF_State& state() const { return m_state; }
 
@@ -25,7 +25,7 @@ public:
 
   // High-level (gyro in rad/s, accel in m/s^2, mag in uT)
   void handle_imu(const DFC_t_MPU9250_Data& imu);
-  void handle_mag_if_ready(const DFC_t_MPU9250_Data& imu);
+  void handle_mag(const DFC_t_MPU9250_Data& imu);
   void handle_baro(const DFC_t_BMP280_Data& baro);
 
   // Utility
@@ -36,9 +36,9 @@ private:
   DFC_t_EKF_State  m_state{};
 
   // Time bookkeeping
-  uint64_t m_last_imu_ts_ns  = 0;
-  uint64_t m_last_mag_ts_ns  = 0;
-  uint64_t m_last_baro_ts_ns = 0;
+  uint64 m_last_imu_ts_ns  = 0;
+  uint64 m_last_mag_ts_ns  = 0;
+  uint64 m_last_baro_ts_ns = 0;
 
   // Math helpers
   static inline void q_norm(float64 q[4]);

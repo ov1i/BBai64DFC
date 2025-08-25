@@ -148,7 +148,13 @@
 		};
 
 		rtos_ipc_memory_region: ipc-memories@aa000000 {
-			reg = <0x00 0xaa000000 0x00 0x01c00000>;
+			reg = <0x00 0xaa000000 0x00 0x01000000>;
+			alignment = <0x1000>;
+			no-map;
+		};
+
+		vision_tele_memory_region: vision_tele_memory_region@0xab000000 {
+			reg = <0x00 0xab000000 0x00 0x00800000>;
 			alignment = <0x1000>;
 			no-map;
 		};

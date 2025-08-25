@@ -11,9 +11,82 @@ extern "C" {
 #include <ti/drv/uart/UART_stdio.h>
 }
 
-/// TODO: Change UART_printf to logger thread
 namespace i2c {
+bool C_I2C::startModule(uint32 id) {
+  Sciclient_ConfigPrms_t config; 
+  Sciclient_configPrmsInit(&config);
+  sint32 status = Sciclient_init(&config);
+  if (status && status != SCICLIENT_EALREADY_OPEN) return false;
+  
+  struct tisci_msg_set_device_req  req  = { 0 };
+  struct tisci_msg_set_device_resp resp = { 0 };
+
+  Sciclient_ReqPrm_t reqParam  = { 0 };
+  Sciclient_RespPrm_t respParam = { 0 };
+
+  req.id         = id;
+  req.state      = TISCI_MSG_VALUE_DEVICE_SW_STATE_ON;
+  req.hdr.type   = TISCI_MSG_SET_DEVICE;
+  req.hdr.host   = TISCI_HOST_ID_MAIN_0;
+  req.hdr.flags  = TISCI_MSG_FLAG_AOP;
+
+  reqParam.messageType    = TISCI_MSG_SET_DEVICE_STATE;
+  reqParam.pReqPayload    = (const uint8*)&req;
+  reqParam.reqPayloadSize = (uint32)sizeof(req);
+  reqParam.timeout        = SCICLIENT_SERVICE_WAIT_FOREVER;
+
+  respParam.pRespPayload    = (uint8*)&resp;
+  respParam.respPayloadSize = (uint32)sizeof(resp);
+
+  status = Sciclient_service(&reqParam, &respParam);
+  if (status != CSL_PASS) return false;
+
+  if ((sresp.flags & TISCI_MSG_FLAG_ACK) != TISCI_MSG_FLAG_ACK) {
+    return false;
+  }
+
+  return true;
+}
+
 bool C_I2C::preinit(uint32 instance) {
+  if(!startModule(TISCI_DEV_I2C4)) return false;
+  if(!startModule(TISCI_DEV_I2C6)) return false;
+
+  /// AA3 - pin
+  muxData = 0x64002;
+  boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG116), muxData);
+  if(boardStatus == BOARD_SOK) {
+    UART_printf("AA3 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+  } else {
+    UART_printf("AA3 pin i2c mode switch failed..\r\n");
+  }
+
+  /// Y2 - pin
+  muxData = 0x64002;
+  boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG121), muxData);
+  if(boardStatus == BOARD_SOK) {
+    UART_printf("Y2 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+  } else {
+    UART_printf("Y2 pin i2c mode switch failed..\r\n");
+  }
+
+  /// Y5 - pin
+  muxData = 0x64002;
+  boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG120), muxData);
+  if(boardStatus == BOARD_SOK) {
+    UART_printf("Y5 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+  } else {
+    UART_printf("Y5 pin i2c mode switch failed..\r\n");
+  }
+
+  /// Y1 - pin
+  muxData = 0x64002;
+  boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG119), muxData);
+  if(boardStatus == BOARD_SOK) {
+    UART_printf("Y1 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+  } else {
+    UART_printf("Y1 pin i2c mode switch failed..\r\n");
+  }
 
   uint32 baseAddr;
   I2C_HwAttrs i2cCfg;
@@ -69,7 +142,6 @@ bool C_I2C::preinit(uint32 instance) {
 bool C_I2C::init(uint32 instance, I2C_BitRate bitRate) {
   I2C_Params i2cParams;
 
-  /// TODO: Add checks for I2C occupied by other core/task
   if (instance >= I2C_HWIP_MAX_CNT) {
     UART_printf("I2C init error: instance %u out of range (max %u)\n", instance,
                 I2C_HWIP_MAX_CNT - 1);

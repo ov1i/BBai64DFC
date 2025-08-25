@@ -6,12 +6,14 @@ inline void C_EKF::q_norm(float64 q[4]) {
   float64 n = std::sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]);
   if (n > 1e-12) { q[0]/=n; q[1]/=n; q[2]/=n; q[3]/=n; }
 }
+
 inline void C_EKF::q_mul(const float64 a[4], const float64 b[4], float64 o[4]) {
   o[0] = a[0]*b[0] - a[1]*b[1] - a[2]*b[2] - a[3]*b[3];
   o[1] = a[0]*b[1] + a[1]*b[0] + a[2]*b[3] - a[3]*b[2];
   o[2] = a[0]*b[2] - a[1]*b[3] + a[2]*b[0] + a[3]*b[1];
   o[3] = a[0]*b[3] + a[1]*b[2] - a[2]*b[1] + a[3]*b[0];
 }
+
 inline void C_EKF::q_from_dtheta(const float64 dth[3], float64 q[4]) {
   float64 a = std::sqrt(dth[0]*dth[0] + dth[1]*dth[1] + dth[2]*dth[2]);
   float64 ha = 0.5 * a;
@@ -21,6 +23,7 @@ inline void C_EKF::q_from_dtheta(const float64 dth[3], float64 q[4]) {
   q[2] = s * dth[1];
   q[3] = s * dth[2];
 }
+
 void C_EKF::R_from_q(const float64 q[4], float64 R[9]) {
   float64 w=q[0], x=q[1], y=q[2], z=q[3];
   float64 ww=w*w, xx=x*x, yy=y*y, zz=z*z;
@@ -57,6 +60,7 @@ void C_EKF::reset(uint64 t0_ns) {
 inline void C_EKF::mat15_add_Q(float64* P, const float64* Q) {
   for (uint8 i=0;i<15;i++) P[i*15 + i] += Q[i];
 }
+
 inline void C_EKF::mat15_FP_PFT(float64* P, const float64* F, float64 dt) {
   float64 FP[15*15];
   for (uint8 i=0;i<15;i++){
@@ -72,6 +76,7 @@ inline void C_EKF::mat15_FP_PFT(float64* P, const float64* F, float64 dt) {
     }
   }
 }
+
 inline void C_EKF::matMN_vec(const float64* M, const float64* v, float64* out, uint8 rows, uint8 cols) {
   for (uint8 i=0;i<rows;i++){
     float64 s=0.0;
@@ -79,6 +84,7 @@ inline void C_EKF::matMN_vec(const float64* M, const float64* v, float64* out, u
     out[i]=s;
   }
 }
+
 inline void C_EKF::axpy(float64* x, const float64* a, float64 k, uint8 n) {
   for (uint8 i=0;i<n;i++) x[i] += k*a[i];
 }
@@ -173,7 +179,7 @@ void C_EKF::predict(const float64 gyro[3], const float64 acc[3], float64 dt) {
   mat15_add_Q(m_state.P, Qd);
   pin_P();
 
-  m_state.t_ns += (uint64_t)llround(dt * 1e9);
+  m_state.t_ns += (uint64)llround(dt * 1e9);
 }
 
 void C_EKF::inject_error(const float64 dx[15]) {
@@ -189,6 +195,7 @@ void C_EKF::inject_error(const float64 dx[15]) {
   m_state.bg[0]+=dx[9];  m_state.bg[1]+=dx[10]; m_state.bg[2]+=dx[11];
   m_state.ba[0]+=dx[12]; m_state.ba[1]+=dx[13]; m_state.ba[2]+=dx[14];
 }
+
 void C_EKF::pin_P() {
   for (uint8 i=0;i<15;i++){
     float64 &d = m_state.P[i*15 + i];
@@ -364,7 +371,7 @@ void C_EKF::handle_imu(const DFC_t_MPU9250_Data& input) {
   handle_mag_if_ready(input);
 }
 
-void C_EKF::handle_mag_if_ready(const DFC_t_MPU9250_Data& input) {
+void C_EKF::handle_mag(const DFC_t_MPU9250_Data& input) {
   if (!input.mag_rdy) return;
   if (input.tsmag_ns == 0 || input.tsmag_ns == m_last_mag_ts_ns) return;
   // Reject very stale samples (>100 ms older than current state time)

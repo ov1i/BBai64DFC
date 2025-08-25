@@ -1,9 +1,9 @@
 #include "barometer/bmp280.h"
 #include "i2c/i2c_helper.h"
+#include <cmath>
 #include <cstring>
 #include <dfc_types.h>
 #include <utils.h>
-#include <cmath>
 
 extern "C" {
 #include <ti/csl/csl_types.h>
@@ -14,12 +14,9 @@ extern "C" {
 #include <ti/drv/uart/UART_stdio.h>
 }
 
-
 namespace baro {
 
-C_BMP280::C_BMP280() { 
-    std::memset(this, 0, sizeof(*this)); 
-}
+C_BMP280::C_BMP280() { std::memset(this, 0, sizeof(*this)); }
 
 bool C_BMP280::init() {
   if (!m_i2cState) {
@@ -29,7 +26,7 @@ bool C_BMP280::init() {
     }
   }
 
-  uint8 temp[2] = { BMP280_RST_REG , 0xB6 };
+  uint8 temp[2] = {BMP280_RST_REG, 0xB6};
   m_i2cHandler.writeRegSingletVal(BMP280_ADDRESS, temp);
 
   if (!updateInternalCalib()) {
@@ -58,6 +55,17 @@ bool C_BMP280::init() {
 }
 
 bool C_BMP280::update() {
+  uint8 status;
+  if (!m_i2cHandler.rw(BMP280_ADDRESS, &BMP280_STATUS_REGISTER, 1, &status, 1)) {
+    UART_printf("Failed to read BMP status register\r\n");
+    return false;
+  }
+  
+  if (status & 0x8) {
+    UART_printf("BMP data not ready\r\n");
+    return false;
+  }
+
   uint8 tempBuffer[6];
   if (!m_i2cHandler.rw(BMP280_ADDRESS, &BMP280_PMSB_DATA_REGISTER, 1, tempBuffer, 6)) {
     UART_printf("[BMP280] read FAILED\r\n");
@@ -72,8 +80,7 @@ bool C_BMP280::update() {
 
 bool C_BMP280::updateInternalCalibReg() {
   uint8 tempBuffer[24];
-  if (!m_i2cHandler.rw(BMP280_ADDRESS, &BMP280_T1_CALIB_ADDR, 1, tempBuffer, sizeof(tempBuffer)))
-    return false;
+  if (!m_i2cHandler.rw(BMP280_ADDRESS, &BMP280_T1_CALIB_ADDR, 1, tempBuffer, sizeof(tempBuffer))) return false;
 
   m_data.calibration_data.dig_T1 = (uint16)(tempBuffer[1] << 8 | tempBuffer[0]);
   m_data.calibration_data.dig_T2 = (sint16)(tempBuffer[3] << 8 | tempBuffer[2]);
@@ -87,15 +94,14 @@ bool C_BMP280::updateInternalCalibReg() {
   m_data.calibration_data.dig_P7 = (sint16)(tempBuffer[19] << 8 | tempBuffer[18]);
   m_data.calibration_data.dig_P8 = (sint16)(tempBuffer[21] << 8 | tempBuffer[20]);
   m_data.calibration_data.dig_P9 = (sint16)(tempBuffer[23] << 8 | tempBuffer[22]);
-  
+
   return true;
 }
 
 void C_BMP280::internalValCompensation(sint32 rawTempData, sint32 rawPressureData) {
   // temperature
   sint32 var1 = ((((rawTempData >> 3) - ((sint32)m_data.calibration_data.dig_T1 << 1))) * ((sint32)m_data.calibration_data.dig_T2)) >> 11;
-  sint32 var2 = (((((rawTempData >> 4) - ((sint32)m_data.calibration_data.dig_T1)) * ((rawTempData >> 4) - ((sint32)m_data.calibration_data.dig_T1))) >> 12) *
-                 ((sint32)m_data.calibration_data.dig_T3)) >> 14;
+  sint32 var2 = (((((rawTempData >> 4) - ((sint32)m_data.calibration_data.dig_T1)) * ((rawTempData >> 4) - ((sint32)m_data.calibration_data.dig_T1))) >> 12) * ((sint32)m_data.calibration_data.dig_T3)) >> 14;
   sint32 fineResolution = var1 + var2;
   sint32 processedTemp = (fineResolution * 5 + 128) >> 8; // 0.01 C
   m_data.temp = (float64)T / 100.0;
@@ -105,8 +111,7 @@ void C_BMP280::internalValCompensation(sint32 rawTempData, sint32 rawPressureDat
   sint64 var2p = var1p * var1p * (sint64)m_data.calibration_data.dig_P6;
   var2p = var2p + ((var1p * (sint64)m_data.calibration_data.dig_P5) << 17);
   var2p = var2p + (((sint64)m_data.calibration_data.dig_P4) << 35);
-  var1p =
-      ((var1p * var1p * (sint64)m_data.calibration_data.dig_P3) >> 8) + ((var1p * (sint64)m_data.calibration_data.dig_P2) << 12);
+  var1p = ((var1p * var1p * (sint64)m_data.calibration_data.dig_P3) >> 8) + ((var1p * (sint64)m_data.calibration_data.dig_P2) << 12);
   var1p = (((((sint64)1) << 47) + var1p)) * ((sint64)m_data.calibration_data.dig_P1) >> 33;
   if (var1p == 0) {
     m_data.pressure = 0.0;

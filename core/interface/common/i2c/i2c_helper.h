@@ -26,6 +26,7 @@ class C_I2C {
 
         I2C_Handle &getHandler();
     private:
+        bool startModule(uint32 id);
         I2C_Handle m_handler;
 };
 

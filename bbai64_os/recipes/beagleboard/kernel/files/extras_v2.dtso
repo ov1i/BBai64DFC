@@ -7,7 +7,7 @@
 	};
 };
 
-&{/} {
+&{/} { // we fixed this addr in extras.dtso
     reserved-memory {
         #address-cells = <2>;
         #size-cells = <2>;
