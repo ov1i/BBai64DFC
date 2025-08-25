@@ -48,10 +48,11 @@ private:
   DFC_t_GyroCorrect_Container m_gyroRing[GYRO_RING_SIZE]{};
   uint16 m_ringHead{0};
 
-  // Helpers for accumulation gyro data over the frame duration (for derot)
+  // Helpers for accumulation gyro data over the frame duration and mapping low quality to big scale factor for low K gain (for derot)
   bool gyro_mean(uint64 t0, uint64 t1, float64 output[3]) const;
   void ring_push(uint64 ts, const float64 ringContainer[3]);
-
+  static inline float64 getQualityScaleFactor(float64 quality)
+  
   // Math helpers
   static inline void q_norm(float64 q[4]);
   static inline void q_mul(const float64 a[4], const float64 b[4], float64 o[4]);

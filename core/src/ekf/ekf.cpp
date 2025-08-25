@@ -43,7 +43,8 @@ void C_EKF::reset(uint64 ts_prev_ns) {
   m_state.q[0] = 1.0;
   m_state.t_ns = ts_prev_ns;
 
-  // Diagonal covariance init (use correct 15x15 stride!)
+  // Initialize P’s diagonal (15×15): pick prior variances for pos/vel/att/biases.
+  // Think “initial uncertainty bubbles”: position ~= 1 m^2, velocity ~= 0.5 (m/s)^2, attitude ~= 0.2 rad^2, small bias variances.
   for (uint8 i=0;i<15*15;i++) m_state.P[i]=0.0f;
   auto setD = [&](uint8 i, float64 v){ m_state.P[i*15 + i] = v; };
   setD(0,1.0); setD(1,1.0); setD(2,1.0);        // pos
@@ -90,11 +91,11 @@ inline void C_EKF::axpy(float64* x, const float64* a, float64 k, uint8 n) {
 }
 
 void C_EKF::predict(const float64 gyro[3], const float64 acc[3], float64 dt) {
-  // Guard dt
+  // Guard dt..protects against timestamp jitter/spikes in real flight.
   if (!(dt > 0.0)) dt = 0.005;
   if (dt > 0.05)   dt = 0.05;
 
-  // Bias corrected signals
+  // Bias corrected signals..we remove drift before integrating
   float64 w[3] = { gyro[0] - m_state.bg[0],
                   gyro[1] - m_state.bg[1],
                   gyro[2] - m_state.bg[2] };
@@ -102,12 +103,15 @@ void C_EKF::predict(const float64 gyro[3], const float64 acc[3], float64 dt) {
                   acc[1]  - m_state.ba[1],
                   acc[2]  - m_state.ba[2] };
 
-  // Quaternion integration
+  // Quaternion integration (q * exp(1/2*dthetha))
   float64 dth[3] = { w[0]*dt, w[1]*dt, w[2]*dt };
-  float64 dq[4]; q_from_dtheta(dth, dq);
-  float64 qn[4]; q_mul(m_state.q, dq, qn); q_norm(qn);
+  float64 dq[4]; 
+  float64 qn[4]; 
+  q_from_dtheta(dth, dq);
+  q_mul(m_state.q, dq, qn); 
+  q_norm(qn);
 
-  // Acc in NED (z down) and subtract gravity
+  // Acc in NED (z down) and subtract gravity (some sort of pilot intuition..Earth-frame accel after gravity)
   float64 Rbe[9]; R_from_q(qn, Rbe);
   float64 aN[3] = {
     Rbe[0]*f[0] + Rbe[1]*f[1] + Rbe[2]*f[2],
@@ -115,7 +119,7 @@ void C_EKF::predict(const float64 gyro[3], const float64 acc[3], float64 dt) {
     Rbe[6]*f[0] + Rbe[7]*f[1] + Rbe[8]*f[2] - GRAVITY
   };
 
-  // Nominal integration
+  // Nominal kinematics integration
   m_state.p[0] += m_state.v[0]*dt + 0.5*aN[0]*dt*dt;
   m_state.p[1] += m_state.v[1]*dt + 0.5*aN[1]*dt*dt;
   m_state.p[2] += m_state.v[2]*dt + 0.5*aN[2]*dt*dt;
@@ -124,12 +128,14 @@ void C_EKF::predict(const float64 gyro[3], const float64 acc[3], float64 dt) {
   m_state.v[2] += aN[2]*dt;
   m_state.q[0]=qn[0]; m_state.q[1]=qn[1]; m_state.q[2]=qn[2]; m_state.q[3]=qn[3];
 
-  // Linearized error dynamics F (15x15)
+  // Linearized error dynamics F (15x15) for error-state [p, v, θ, b_g, b_a]
   float64 F[15*15]; std::memset(F, 0, sizeof(F));
-  // dpdot = dv
-  F[0*15 + 3] = 1.0; F[1*15 + 4] = 1.0; F[2*15 + 5] = 1.0;
+  // dpdot = dv (position rate depends linearly on velocity)
+  F[0*15 + 3] = 1.0; 
+  F[1*15 + 4] = 1.0; 
+  F[2*15 + 5] = 1.0;
 
-  // dv wrt dtheta: -R*[f]_x
+  // dv / wrt * dtheta = -R*[f]_x, basically small tilt error results in velocity drift (pilot sees slow slide when attitude is off)
   float64 fx=f[0], fy=f[1], fz=f[2];
   float64 C1[9] = { 0, -fz,  fy,
                    fz, 0,  -fx,
@@ -149,12 +155,12 @@ void C_EKF::predict(const float64 gyro[3], const float64 acc[3], float64 dt) {
   F[4*15+6]=(float64)M[3]; F[4*15+7]=(float64)M[4]; F[4*15+8]=(float64)M[5];
   F[5*15+6]=(float64)M[6]; F[5*15+7]=(float64)M[7]; F[5*15+8]=(float64)M[8];
 
-  // dv wrt dba: -R
+  // dv wrt dba = -R, basically accel bias looks like a constant acceleration in nav frame (causes steady drift if uncorrected)
   F[3*15+12]=-(float64)Rbe[0]; F[3*15+13]=-(float64)Rbe[1]; F[3*15+14]=-(float64)Rbe[2];
   F[4*15+12]=-(float64)Rbe[3]; F[4*15+13]=-(float64)Rbe[4]; F[4*15+14]=-(float64)Rbe[5];
   F[5*15+12]=-(float64)Rbe[6]; F[5*15+13]=-(float64)Rbe[7]; F[5*15+14]=-(float64)Rbe[8];
 
-  // dthetadot wrt dbg: -I  (simple bias coupling)
+  // dthetadot * wrt / dbg = -I, it's a simple gyro bias integration in attitude
   F[6*15+9] = -1.0; F[7*15+10] = -1.0; F[8*15+11] = -1.0;
 
   // Discrete process noise (very simplified diag mapping)
@@ -165,7 +171,7 @@ void C_EKF::predict(const float64 gyro[3], const float64 acc[3], float64 dt) {
   float64 sba = m_params.acc_bias_rw;
   float64 dtf = (float64)dt;
 
-  Qd[0]=1e-6f; Qd[1]=1e-6f; Qd[2]=1e-6f;  // pos
+  Qd[0]=1e-6; Qd[1]=1e-6; Qd[2]=1e-6;  // pos
   float64 dvv = (sa*dtf)*(sa*dtf);
   Qd[3]=dvv; Qd[4]=dvv; Qd[5]=dvv;        // vel
   float64 dtt = (sg*dtf)*(sg*dtf);
@@ -183,7 +189,7 @@ void C_EKF::predict(const float64 gyro[3], const float64 acc[3], float64 dt) {
 }
 
 void C_EKF::inject_error(const float64 dx[15]) {
-  // [dp dv dθ dbg dba]
+  // [dp dv dθ dbg dba] -> error-state increment
   m_state.p[0]+=dx[0]; m_state.p[1]+=dx[1]; m_state.p[2]+=dx[2];
   m_state.v[0]+=dx[3]; m_state.v[1]+=dx[4]; m_state.v[2]+=dx[5];
 
@@ -199,13 +205,14 @@ void C_EKF::inject_error(const float64 dx[15]) {
 void C_EKF::pin_P() {
   for (uint8 i=0;i<15;i++){
     float64 &d = m_state.P[i*15 + i];
-    if (d < 1e-9f) d = 1e-9f;
-    if (d > 1e6f) d = 1e6f;
+    if (d < 1e-9) d = 1e-9;
+    if (d > 1e6) d = 1e6;
   }
 }
 
 void C_EKF::update_baro(float64 z_meas, float64 std_override) {
   // h(x) = p_z
+  // gives NED-down altitude
   float64 H[15]={0}; H[2]=1.0;
   float64 R   = (std_override > 0.0 ? std_override : m_params.baro_std);
   R = R*R;
@@ -221,7 +228,7 @@ void C_EKF::update_baro(float64 z_meas, float64 std_override) {
   for (uint8 i=0;i<15;i++) dx[i] = K[i]*r;
   inject_error(dx);
 
-  // (I - KH)P for scalar H with only index 2 nonzero → row 2 of P
+  // Covariance update: P = (I − K H) P, with scalar H
   for (uint8 i=0;i<15;i++){
     for (uint8 j=0;j<15;j++){
       m_state.P[i*15 + j] -= K[i]*H[j]*m_state.P[2*15 + j];
@@ -232,6 +239,7 @@ void C_EKF::update_baro(float64 z_meas, float64 std_override) {
 
 void C_EKF::update_mag_body(const float64 b_meas[3]) {
   // Predict body magnetic vector from world-frame mN
+  // we can call it local declination/inclination
   float64 R[9]; R_from_q(m_state.q, R);
   float64 mN[3] = { m_params.magN[0], m_params.magN[1], m_params.magN[2] };
   // body = R^T * mN
@@ -240,19 +248,20 @@ void C_EKF::update_mag_body(const float64 b_meas[3]) {
     (float64)(R[1]*mN[0] + R[4]*mN[1] + R[7]*mN[2]),
     (float64)(R[2]*mN[0] + R[5]*mN[1] + R[8]*mN[2]),
   };
-  // residual
+  // unit-vector compass direction
   float64 r[3] = { (float64)(b_meas[0] - b_pred[0]),
                  (float64)(b_meas[1] - b_pred[1]),
                  (float64)(b_meas[2] - b_pred[2]) };
 
-  // Jacobian w.r.t attitude error: ∂b/∂dθ ≈ -[b_pred]_x
+  // Jacobian w.r.t attitude error
   float64 bx=b_pred[0], by=b_pred[1], bz=b_pred[2];
   float64 J[9] = {    0, -bz,  by,
                   bz,   0, -bx,
                  -by,  bx,   0 };
   for (uint8 i=0;i<9;i++) J[i] = -J[i];
 
-  // Use θθ block only (3x3) for speed
+  // Use Ptt block only (3x3) for speed
+  // Basically we updated "compass nudge" to attitude while leaving other states unchanged in this update
   float64 Ptt[9] = {
     m_state.P[6*15+6], m_state.P[6*15+7], m_state.P[6*15+8],
     m_state.P[7*15+6], m_state.P[7*15+7], m_state.P[7*15+8],
@@ -268,17 +277,17 @@ void C_EKF::update_mag_body(const float64 b_meas[3]) {
     float64 s=0.0; for (uint8 k=0;k<3;k++) s += JP[i*3+k]*J[j*3+k];
     S[i*3+j] = s + (i==j ? m_params.mag_std*m_params.mag_std : 0.0);
   }
-  // invert S (3x3)
+  // invert S (3x3) (the innovation covariance)
   float64 a=S[0], b=S[1], c=S[2], d=S[3], e=S[4], f=S[5], g=S[6], h=S[7], k=S[8];
   float64 det = a*(e*k - f*h) - b*(d*k - f*g) + c*(d*h - e*g);
-  if (std::fabs(det) < 1e-9f) return;
+  if (std::fabs(det) < 1e-12) return; // more precision than -9
   float64 invS[9] = {
-    (e*k - f*h)/det, (c*h - b*k)/det, (b*f - c&e)/det,
+    (e*k - f*h)/det, (c*h - b*k)/det, (b*f - c*e)/det,
     (f*g - d*k)/det, (a*k - c*g)/det, (c*d - a*f)/det,
     (d*h - e*g)/det, (b*g - a*h)/det, (a*e - b*d)/det
   };
 
-  // Kθ = Ptt * J^T * invS
+  // attitude-only Kalman gain = Ptt * transpose(Jacobian) * innovation covariance
   float64 JT[9] = { J[0],J[3],J[6], J[1],J[4],J[7], J[2],J[5],J[8] };
   float64 PJt[9];
   for (uint8 i=0;i<3;i++) for (uint8 j=0;j<3;j++){
@@ -291,7 +300,7 @@ void C_EKF::update_mag_body(const float64 b_meas[3]) {
     Kt[i*3+j]=s;
   }
 
-  // dxθ = Kt * r
+  // compute attitude correction and inject into quaternion.
   float64 dth[3] = {
     Kt[0]*r[0] + Kt[1]*r[1] + Kt[2]*r[2],
     Kt[3]*r[0] + Kt[4]*r[1] + Kt[5]*r[2],
@@ -301,7 +310,7 @@ void C_EKF::update_mag_body(const float64 b_meas[3]) {
   dx[6]=dth[0]; dx[7]=dth[1]; dx[8]=dth[2];
   inject_error(dx);
 
-  // Pθθ = (I - Kθ J) Pθθ
+  // Ptt = (I - Ktheta J) Ptt
   float64 I3[9]={1,0,0, 0,1,0, 0,0,1};
   float64 KJ[9];
   for (uint8 i=0;i<3;i++) for (uint8 j=0;j<3;j++){
@@ -322,12 +331,14 @@ void C_EKF::update_mag_body(const float64 b_meas[3]) {
 }
 
 void C_EKF::update_flow_pxrate_derot(const float64 px_rate[2], float64 height_m, float64 quality) {
-  if (quality < 0.05 || height_m < 0.05) return;
+  if (quality < 0.005 || height_m < 0.05) return;
 
   float64 vbx = -height_m * (px_rate[0] / m_params.focalLengthX);
   float64 vby = -height_m * (px_rate[1] / m_params.focalLengthY);
 
-  float64 R[9]; R_from_q(m_state.q, R);
+  float64 R[9]; 
+  R_from_q(m_state.q, R);
+
   float64 vN = (float64)(R[0]*vbx + R[1]*vby);
   float64 vE = (float64)(R[3]*vbx + R[4]*vby);
 
@@ -335,19 +346,22 @@ void C_EKF::update_flow_pxrate_derot(const float64 px_rate[2], float64 height_m,
   float64 rE = vE - (float64)m_state.v[1];
 
   float64 base = m_params.flow_vel_std;
-  float64 std  = base * (1.0f + 0.4f*(float64)std::fmax(0.0, height_m - 1.0));
-  float64 Rm   = std*std;
+  float64 std  = base * (1.0 + 0.4*(float64)std::fmax(0.0, height_m - 1.0));
 
-  float64 Pvx = m_state.P[3*15+3];
-  float64 Kx  = Pvx / (Pvx + Rm);
-  m_state.v[0] += Kx * rN;
-  m_state.P[3*15+3] *= (1.0f - Kx);
+  float64 scale = getQualityScaleFactor(quality);
+  float64 Rm   = scale*std*std;
 
-  float64 Pvy = m_state.P[4*15+4];
-  float64 Ky  = Pvy / (Pvy + Rm);
-  m_state.v[1] += Ky * rE;
-  m_state.P[4*15+4] *= (1.0f - Ky);
+  {
+    float64 Pvx = m_state.P[3*15+3];
+    float64 Kx  = Pvx / (Pvx + Rm);
+    m_state.v[0] += Kx * rN;
+    m_state.P[3*15+3] *= (1.0f - Kx);
 
+    float64 Pvy = m_state.P[4*15+4];
+    float64 Ky  = Pvy / (Pvy + Rm);
+    m_state.v[1] += Ky * rE;
+    m_state.P[4*15+4] *= (1.0f - Ky);
+  }
   pin_P();
 }
 
@@ -406,6 +420,16 @@ void C_EKF::ring_push(uint64 ts, const float64 ringContainer[3]) {
   m_gyroRing[m_ringHead].w[2] = ringContainer[2];
 }
 
+static inline float64 getQualityScaleFactor(float64 quality) {
+  if (quality <= 0.05) return 100.0; // Smallest Kalman gain possible
+  if (quality <= 0.20) return 25.0;
+  if (quality <= 0.40) return 9.0;
+  if (quality <= 0.70) return 3.0;
+
+  return 1.0;
+}
+
+
 void C_EKF::handle_imu(const DFC_t_MPU9250_Data& input) {
   if (m_last_imu_ts_ns == 0) {
     m_last_imu_ts_ns = input.ts_ns;
@@ -459,10 +483,10 @@ void C_EKF::handle_flow(const DFC_t_MsgOpticalFlow& msg) {
       return;
   }
 
-  if(msg.quality < 0.05f || msg.ts_curr_ns == 0) return;
+  if(msg.quality < 0.005 || msg.ts_curr_ns == 0) return;
   if(m_last_flow_ts_ns != 0 && msg.ts_curr_ns <= m_last_flow_ts_ns) return; // no good data order corrupted
 
-  // camera aligned with body
+  // camera axes aligned with body (no extrinsics)
   float64 avg[3] = {0,0,0};
   bool ok = gyro_mean(msg.ts_prev_ns ? msg.ts_prev_ns : msg.ts_curr_ns, msg.ts_curr_ns, avg); // average gyro over window [t0, t1] (bias-corrected)
   if(!ok) {
