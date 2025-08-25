@@ -23,7 +23,7 @@ C_BMP280::C_BMP280() {
 
 bool C_BMP280::init() {
   if (!m_i2cState) {
-    m_i2cState = m_i2cHandler.init(4, I2C_400kHz);
+    m_i2cState = m_i2cHandler.init(2, I2C_400kHz);
     if (!m_i2cState) {
       return false;
     }

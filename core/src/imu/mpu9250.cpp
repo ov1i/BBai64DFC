@@ -15,7 +15,7 @@ extern "C" {
 
 namespace imu {
 C_IMU::C_IMU() {
-  memset(&m_rawData, 0, sizeof(m_rawData));
+  memset(&m_data, 0, sizeof(m_data));
   memset(&m_i2cHandler, 0, sizeof(m_i2cHandler));
   m_i2cState = false;
 }
@@ -160,17 +160,13 @@ bool C_IMU::init() {
 
   // Read sensitivity adjustment values
   UART_printf("[DEBUG]: MAG ASA read...[ SETTING ]\r\n");
-  uint8 asax_reg = MPU9250_MAG_ASAX_CONFIG;
-  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &asax_reg, 1, buffer, 3)) {
+  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &MPU9250_MAG_ASAX_CONFIG, 1, buffer, 3)) {
     UART_printf("[DEBUG]: MAG ASA read...[ FAILED ]\r\n");
     return false;
   }
-  m_rawData.mag_adjustment[0] =
-      ((buffer[0] - 128) * 0.5 / 128.0) + 1.0; // X-axis
-  m_rawData.mag_adjustment[1] =
-      ((buffer[1] - 128) * 0.5 / 128.0) + 1.0; // Y-axis
-  m_rawData.mag_adjustment[2] =
-      ((buffer[2] - 128) * 0.5 / 128.0) + 1.0; // Z-axis
+  m_data.mag_adjustment[0] = ((buffer[0] - 128) * 0.5 / 128.0) + 1.0; // X-axis
+  m_data.mag_adjustment[1] = ((buffer[1] - 128) * 0.5 / 128.0) + 1.0; // Y-axis
+  m_data.mag_adjustment[2] = ((buffer[2] - 128) * 0.5 / 128.0) + 1.0; // Z-axis
 
   // Reset mag
   UART_printf("[DEBUG]: MAG reset..[ SETTING ]\r\n");
@@ -205,20 +201,18 @@ bool C_IMU::update() {
   }
 
   // Accel
-  m_rawData.ax = static_cast<float64>((sint16)((rbuffer[0] << 8) | rbuffer[1]));
-  m_rawData.ay = static_cast<float64>((sint16)((rbuffer[2] << 8) | rbuffer[3]));
-  m_rawData.az = static_cast<float64>((sint16)((rbuffer[4] << 8) | rbuffer[5]));
+  m_data.ax = (float64)((rbuffer[0] << 8) | rbuffer[1]) * acc_cvt_cst;
+  m_data.ay = (float64)((rbuffer[2] << 8) | rbuffer[3]) * acc_cvt_cst;
+  m_data.az = (float64)((rbuffer[4] << 8) | rbuffer[5]) * acc_cvt_cst;
 
   // Gyro
-  m_rawData.gx = static_cast<float64>((sint16)((rbuffer[8] << 8) | rbuffer[9]));
-  m_rawData.gy =
-      static_cast<float64>((sint16)((rbuffer[10] << 8) | rbuffer[11]));
-  m_rawData.gz =
-      static_cast<float64>((sint16)((rbuffer[12] << 8) | rbuffer[13]));
+  m_data.gx = (float64)((rbuffer[8] << 8) | rbuffer[9]) * gyro_cvt_cst;
+  m_data.gy = (float64)((rbuffer[10] << 8) | rbuffer[11]) * gyro_cvt_cst;
+  m_data.gz = (float64)((rbuffer[12] << 8) | rbuffer[13]) * gyro_cvt_cst;
 
   // Temp
   sint16 temp_raw = (rbuffer[6] << 8) | rbuffer[7];
-  m_rawData.temp = static_cast<float64>(temp_raw);
+  m_data.temp = static_cast<float64>(temp_raw);
 
   // Mag
   uint8 status1;
@@ -229,9 +223,7 @@ bool C_IMU::update() {
   }
   if (!(status1 & 0x01)) {
     UART_printf("Magnetometer data not ready\r\n");
-    m_rawData.mag_rdy =
-        false; // will flag data was not changed from one reading of the IMU to
-               // the next (mag -> 100Hz others -> 200Hz)
+    m_data.mag_rdy = false; // will flag data was not changed from one reading of the IMU to the next (mag -> 100Hz others -> 200Hz)
     return true;
   }
 
@@ -247,20 +239,17 @@ bool C_IMU::update() {
     return false;
   }
 
-  m_rawData.mx =
-      static_cast<float64>((sint16)((mag_data[1] << 8) | mag_data[0]));
-  m_rawData.my =
-      static_cast<float64>((sint16)((mag_data[3] << 8) | mag_data[2]));
-  m_rawData.mz =
-      static_cast<float64>((sint16)((mag_data[5] << 8) | mag_data[4]));
+  m_data.mx = (float64)((mag_data[1] << 8) | mag_data[0]) * MAG_UT_PER_LSB * m_data.mag_adjustment[0];
+  m_data.my = (float64)((mag_data[3] << 8) | mag_data[2]) * MAG_UT_PER_LSB * m_data.mag_adjustment[1];
+  m_data.mz = (float64)((mag_data[5] << 8) | mag_data[4]) * MAG_UT_PER_LSB * m_data.mag_adjustment[2];
 
-  m_rawData.mag_rdy = true;
+  m_data.mag_rdy = true;
 
   return true;
 }
 
 void C_IMU::getCurrentRawData(DFC_t_MPU9250_Data *rawData) {
-  rawData = &m_rawData;
+  rawData = &m_data;
 }
 
 } // namespace imu

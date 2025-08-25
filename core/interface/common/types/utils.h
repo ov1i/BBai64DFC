@@ -69,8 +69,13 @@ const uint8  BMP280_CONFIG_REG =             0xF5;
 const uint8  BMP280_T1_CALIB_ADDR =          0x88;
 const uint8  BMP280_PMSB_DATA_REGISTER =     0xF7;
 
-const float32 accel_scale = 16384.0F;
-const float32 gyro_scale = 131.0F;
-const float64 deg_2_rad_cst = 0.017453292519943295;
+const float64 ACC_LSB_PER_G =                8192.0;
+const float64 GYRO_LSB_PER_DPS =             65.5;
+const float64 MAG_UT_PER_LSB =               0.15;
+const float64 GRAVITY =                      9.80665;
+const float64 DEG2RAD =                      0.0174532925;
+
+const float64 acc_cvt_cst =                 GRAVITY / ACC_LSB_PER_G;
+const float64 gyro_cvt_cst =                (1.0 / GYRO_LSB_PER_DPS) * DEG2RAD;
 
 #endif
