@@ -53,6 +53,8 @@ struct DFC_t_EKF_Params{
   float32 mag_std = 0.8F; // arbitrary vector std [uT or normalized]; tune after calib
   float32 flow_vel_std = 0.25F; // m/s at ~1 m height; scaled with height below
 
+  float64 focalLengthX = 532;
+  float64 focalLengthY = 660;
   // Earth magnetic field in NED (normalized or in uT) – set after a quick
   // on-ground calibration
   float32 magN[3] = {0.25f, 0.02f, 0.43f}; // direction, magnitude not critical if std is large
@@ -71,6 +73,13 @@ typedef struct {
 
   uint64 t_ns;
 } DFC_t_EKF_State;
+
+typedef struct {
+  uint64 ts; 
+  float64 w[3]; // bias-corrected rad/s on body/cam frame
+} DFC_t_GyroCorrect_Container;
+
+
 
 enum class DFC_t_Mode : uint8 {
   ACRO = 0,       // rate control only

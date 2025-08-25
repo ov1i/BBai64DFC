@@ -124,8 +124,8 @@ int main(void) {
         msg.magic       = OF_MAGIC;
         msg.ts_prev_ns  = prev_ts_ns;
         msg.ts_curr_ns  = currentImageHeader.ts_ns;
-        msg.u_px_per_s  = flow.valid ? flow.u_px_s : 0.0;
-        msg.v_px_per_s  = flow.valid ? flow.v_px_s : 0.0;
+        msg.u_px_per_s  = flow.valid ? flow.u_px_per_s : 0.0;
+        msg.v_px_per_s  = flow.valid ? flow.v_px_per_s : 0.0;
         msg.quality     = flow.valid ? flow.quality : 0.0;
         msg.width       = (uint16)width;
         msg.height      = (uint16)height;

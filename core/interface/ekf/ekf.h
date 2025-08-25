@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cmath>
 #include "dfc_types.h"
+#include "shared_types.h"
 #include "utils.h"
 
 namespace ekf {
@@ -19,16 +20,18 @@ public:
 
   // Low-level
   void predict(const float64 gyro_rad_s[3], const float64 acc_m_s2[3], float64 dt_s);
-  void update_baro(float64 z_meas_NED_m, float64 std_override_m = -1.0f);
+  
+  void update_baro(float64 z_meas_NED_m, float64 std_override_m = -1.0);
   void update_mag_body(const float64 b_meas_body[3]); // normalized body mag vector
-  void update_flow_pxrate_derot(const float64 px_rate_xy[2], float64 fx_px, float64 fy_px, float64 height_m, float64 quality = 1.0);
+  void update_flow_pxrate_derot(const float64 px_rate_xy[2], float64 height_m, float64 quality = 1.0);
 
-  // High-level (gyro in rad/s, accel in m/s^2, mag in uT)
+  // High-level (gyro in rad/s, accel in m/s^2, mag in uT, baro in Pa, altitude in m, flow is custom)
   void handle_imu(const DFC_t_MPU9250_Data& imu);
   void handle_mag(const DFC_t_MPU9250_Data& imu);
   void handle_baro(const DFC_t_BMP280_Data& baro);
+  void handle_flow(const DFC_t_MsgOpticalFlow& msg);  // derotation included
 
-  // Utility
+  // Utility (get the rotation matrix according to the world frame, derot uses too)
   static void R_from_q(const float64 q[4], float64 R[9]);
 
 private:
@@ -36,9 +39,18 @@ private:
   DFC_t_EKF_State  m_state{};
 
   // Time bookkeeping
-  uint64 m_last_imu_ts_ns  = 0;
-  uint64 m_last_mag_ts_ns  = 0;
-  uint64 m_last_baro_ts_ns = 0;
+  uint64 m_last_imu_ts_ns  { 0 };
+  uint64 m_last_mag_ts_ns  { 0 };
+  uint64 m_last_baro_ts_ns { 0 };
+  uint64 m_last_flow_ts_ns { 0 };
+
+  // IMU ring buffer for flow derotation
+  DFC_t_GyroCorrect_Container m_gyroRing[GYRO_RING_SIZE]{};
+  uint16 m_ringHead{0};
+
+  // Helpers for accumulation gyro data over the frame duration (for derot)
+  bool gyro_mean(uint64 t0, uint64 t1, float64 output[3]) const;
+  void ring_push(uint64 ts, const float64 ringContainer[3]);
 
   // Math helpers
   static inline void q_norm(float64 q[4]);

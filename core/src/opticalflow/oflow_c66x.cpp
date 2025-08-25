@@ -211,8 +211,8 @@ DFC_t_OFlow_Output of_compute_global_flow(const uint8* prevY, const uint8* currY
     if (fabsf(u_buf[i]-u_med) < params.mad_gate*mad_u &&
         fabsf(v_buf[i]-v_med) < params.mad_gate*mad_v) ++inl;
   }
-  out.u_px_s = u_med;
-  out.v_px_s = v_med;
+  out.u_px_per_s = u_med;
+  out.v_px_per_s = v_med;
   out.quality= (float64)inl/(float64)n;
   out.valid  = true;
   return out;

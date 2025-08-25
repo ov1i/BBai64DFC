@@ -9,7 +9,7 @@ extern "C" {
 
 #include <stdint.h>
 
-const uint32 OF_MAGIC = 0x4F464C4FU; // sanity check via magic no.
+const uint32 DFC_FLOW_RAW_MAGIC = 0x4F464C4FU; // sanity check via magic no.
 const uint32 width = 640u;
 const uint32 height = 480u;
 const uint64 baseAddr = 0xAB000000ull;
@@ -55,8 +55,8 @@ typedef struct __attribute__((packed)) {
 } DFC_t_MsgOpticalFlow;
 
 typedef struct {
-  float64 u_px_s;
-  float64 v_px_s;
+  float64 u_px_per_s;
+  float64 v_px_per_s;
   float64 quality;    // 0..1 inliers
   bool valid;
 } DFC_t_OFlow_Output;

@@ -38,10 +38,10 @@ void C_EKF::R_from_q(const float64 q[4], float64 R[9]) {
   R[8] = ww - xx - yy + zz;
 }
 
-void C_EKF::reset(uint64 t0_ns) {
+void C_EKF::reset(uint64 ts_prev_ns) {
   std::memset(&m_state, 0, sizeof(m_state));
   m_state.q[0] = 1.0;
-  m_state.t_ns = t0_ns;
+  m_state.t_ns = ts_prev_ns;
 
   // Diagonal covariance init (use correct 15x15 stride!)
   for (uint8 i=0;i<15*15;i++) m_state.P[i]=0.0f;
@@ -321,12 +321,11 @@ void C_EKF::update_mag_body(const float64 b_meas[3]) {
   pin_P();
 }
 
-void C_EKF::update_flow_pxrate_derot(const float64 px_rate[2], float64 fx, float64 fy,
-                                     float64 height_m, float64 quality) {
+void C_EKF::update_flow_pxrate_derot(const float64 px_rate[2], float64 height_m, float64 quality) {
   if (quality < 0.05 || height_m < 0.05) return;
 
-  float64 vbx = -height_m * (px_rate[0] / fx);
-  float64 vby = -height_m * (px_rate[1] / fy);
+  float64 vbx = -height_m * (px_rate[0] / m_params.focalLengthX);
+  float64 vby = -height_m * (px_rate[1] / m_params.focalLengthY);
 
   float64 R[9]; R_from_q(m_state.q, R);
   float64 vN = (float64)(R[0]*vbx + R[1]*vby);
@@ -352,6 +351,61 @@ void C_EKF::update_flow_pxrate_derot(const float64 px_rate[2], float64 fx, float
   pin_P();
 }
 
+bool C_EKF::gyro_mean(uint64 t0, uint64 t1, float64 output[3]) const {
+  if (t1 <= t0) return false;
+
+  float64 accumulator[3] = {0,0,0};
+  bool any = false;
+
+  // clamp segment to [t0,t1]
+  auto clamp_ns = [&](uint64 t){ return (t < t0) ? t0 : (t > t1 ? t1 : t); };
+
+  for (uint16 i=0;i<GYRO_RING_SIZE-1;i++) {
+    const uint16 idx0 = (m_ringHead - i + GYRO_RING_SIZE) % GYRO_RING_SIZE;
+    const int idx1 = (idx0 - 1 + GYRO_RING_SIZE) % GYRO_RING_SIZE;
+
+    const uint64 ta = m_gyroRing[idx1].ts;
+    const uint64 tb = m_gyroRing[idx0].ts;
+    if (ta == 0 || tb == 0 || tb <= ta) continue;
+
+    // segment outside?
+    if (tb <= t0 || ta >= t1) continue;
+
+    // segment overlap with window
+    uint64 segmentStart = clamp_ns(ta);
+    uint64 segmentEnd = clamp_ns(tb);
+    if (segmentEnd <= segmentStart) continue;
+
+    const float64 dt = (float64)(segmentEnd - segmentStart) * 1e-9;
+    // Approximate sample value as the newer sample
+    const float64 wx = m_gyroRing[idx0].w[0];
+    const float64 wy = m_gyroRing[idx0].w[1];
+    const float64 wz = m_gyroRing[idx0].w[2];
+
+    accumulator[0] += wx * dt;
+    accumulator[1] += wy * dt;
+    accumulator[2] += wz * dt;
+    any = true;
+  }
+
+  if (!any) return false;
+
+  const float64 len = (float64)(t1 - t0) * 1e-9; // window len
+  output[0] = accumulator[0] / len;
+  output[1] = accumulator[1] / len;
+  output[2] = accumulator[2] / len;
+  
+  return true;
+}
+
+void C_EKF::ring_push(uint64 ts, const float64 ringContainer[3]) {
+  m_ringHead = (m_ringHead + 1) % GYRO_RING_SIZE;
+  m_gyroRing[m_ringHead].ts   = ts;
+  m_gyroRing[m_ringHead].w[0] = ringContainer[0];
+  m_gyroRing[m_ringHead].w[1] = ringContainer[1];
+  m_gyroRing[m_ringHead].w[2] = ringContainer[2];
+}
+
 void C_EKF::handle_imu(const DFC_t_MPU9250_Data& input) {
   if (m_last_imu_ts_ns == 0) {
     m_last_imu_ts_ns = input.ts_ns;
@@ -368,7 +422,13 @@ void C_EKF::handle_imu(const DFC_t_MPU9250_Data& input) {
   predict(g, a, dt);
   m_last_imu_ts_ns = input.ts_ns;
 
-  handle_mag_if_ready(input);
+  // push bias-corrected gyro sample to ring (in body/cam frame)
+  const float64 wc[3] = { g[0] - m_state.bg[0],
+                          g[1] - m_state.bg[1],
+                          g[2] - m_state.bg[2] };
+  ring_push(input.ts_ns, wc);
+
+  handle_mag(input);
 }
 
 void C_EKF::handle_mag(const DFC_t_MPU9250_Data& input) {
@@ -387,11 +447,44 @@ void C_EKF::handle_mag(const DFC_t_MPU9250_Data& input) {
 }
 
 void C_EKF::handle_baro(const DFC_t_BMP280_Data& input) {
-  if (input.ts_ns == 0 || input.altitude == 0.0 || input.ts_ns == m_last_baro_ts_ns) return;
+  if(input.ts_ns == 0 || input.altitude == 0.0 || input.ts_ns == m_last_baro_ts_ns) return;
 
   // Convert to NED z (down +), is relative to home (GND)
   update_baro(input.altitude);
   m_last_baro_ts_ns = input.ts_ns;
+}
+
+void C_EKF::handle_flow(const DFC_t_MsgOpticalFlow& msg) {
+  if(!(msg.magic == DFC_FLOW_RAW_MAGIC)) { // Classic sanity check
+      return;
+  }
+
+  if(msg.quality < 0.05f || msg.ts_curr_ns == 0) return;
+  if(m_last_flow_ts_ns != 0 && msg.ts_curr_ns <= m_last_flow_ts_ns) return; // no good data order corrupted
+
+  // camera aligned with body
+  float64 avg[3] = {0,0,0};
+  bool ok = gyro_mean(msg.ts_prev_ns ? msg.ts_prev_ns : msg.ts_curr_ns, msg.ts_curr_ns, avg); // average gyro over window [t0, t1] (bias-corrected)
+  if(!ok) {
+    // fall back to the "latest"
+    const DFC_t_GyroCorrect_Container &last = m_gyroRing[m_ringHead];
+    avg[0]=last.w[0]; avg[1]=last.w[1]; avg[2]=last.w[2];
+  }
+
+  // Derotation (small-FOV approximation; ignore yaw image-plane coupling terms)
+  // flow_x(rad/s) ~= -v_x/Z + ω_y  => u_correction = u_raw - fx*ω_y (px/s)
+  // flow_y(rad/s) ~= -v_y/Z - ω_x  => v_correction = v_raw + fy*ω_x (px/s)
+  const float64 u_correction = (float64)msg.u_px_per_s - m_params.focalLengthX * avg[1];
+  const float64 v_correction = (float64)msg.v_px_per_s + m_params.focalLengthY * avg[0];
+
+  // Scale by estimated altitude (down = +Z)
+  float64 height_m = -m_state.p[2];
+  if(height_m < 0.05) return;
+
+  const float64 px_rate[2] = { u_correction, v_correction };
+  update_flow_pxrate_derot(px_rate, height_m, (float64)msg.quality);
+
+  m_last_flow_ts_ns = msg.ts_curr_ns;
 }
 
 } // namespace ekf
