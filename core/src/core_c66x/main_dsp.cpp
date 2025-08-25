@@ -121,7 +121,7 @@ int main(void) {
 
         // Prepare msg for R5F
         DFC_t_MsgOpticalFlow msg{};
-        msg.magic       = OF_MAGIC;
+        msg.magic       = DFC_FLOW_RAW_MAGIC;
         msg.ts_prev_ns  = prev_ts_ns;
         msg.ts_curr_ns  = currentImageHeader.ts_ns;
         msg.u_px_per_s  = flow.valid ? flow.u_px_per_s : 0.0;
