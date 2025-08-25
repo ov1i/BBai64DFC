@@ -216,8 +216,7 @@ bool C_IMU::update() {
 
   // Mag
   uint8 status1;
-  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &MPU9250_MAG_STATUS_1, 1, &status1,
-                       1)) {
+  if (!m_i2cHandler.rw(MPU9250_AK8963_ADDR, &MPU9250_MAG_STATUS_1, 1, &status1, 1)) {
     UART_printf("Failed to read AK8963 status1\r\n");
     return false;
   }

@@ -25,7 +25,7 @@ public:
 
   // High-level (gyro in rad/s, accel in m/s^2, mag in uT)
   void handle_imu(const DFC_t_MPU9250_Data& imu);
-  void handle_mag_if_ready(const DFC_t_MPU9250_Data& imu);
+  void handle_mag(const DFC_t_MPU9250_Data& imu);
   void handle_baro(const DFC_t_BMP280_Data& baro);
 
   // Utility

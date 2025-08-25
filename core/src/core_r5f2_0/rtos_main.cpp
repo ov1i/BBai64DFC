@@ -16,58 +16,23 @@ extern "C" {
 // #include "rpmsg_lite.h"
 
 }
-// #include "comms/logger.h"
 #include "imu/mpu9250.h"
 #include "dfc_types.h"
 
 
 static uint8 gTaskStackIMU[IMU_TASKSTACKSIZE]                   __attribute__((aligned(32)));
 // static uint8 gTaskStackEKF[EKF_TASKSTACKSIZE]                   __attribute__((aligned(32)));
-// static uint8 gTaskStackLogger[LOGGER_TASKSTACKSIZE]             __attribute__((aligned(32)));
 static uint8 gTaskStackInit[INIT_TASKSTACKSIZE]                 __attribute__((aligned(32)));
 
 void initTask(void *arg0, void *arg1) {
     imu::C_IMU* pImuOBJ = (imu::C_IMU*)arg0;
     SemaphoreP_Handle* pInitSempahHandler = (SemaphoreP_Handle*)arg1;
     Board_STATUS boardStatus = BOARD_SOK;
-    uint32 muxData;;
+    uint32 muxData;
 
     UART_init();
     UART_stdioInit(0);
     
-    /// AA3 - pin
-    muxData = 0x64002;
-    boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG116), muxData);
-    if(boardStatus == BOARD_SOK) {
-        UART_printf("AA3 pin succesfully set in i2c mode!\r\n");
-    } else {
-        UART_printf("AA3 pin i2c mode switch failed..\r\n");
-    }
-
-    boardStatus = Board_pinmuxGetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG116), &muxData);
-    if(boardStatus == BOARD_SOK) {
-        UART_printf("AA3 pin fetched and checked succefully (settings: %X)\r\n", muxData);
-    } else {
-        UART_printf("AA3 pin fetched and checks failed..\r\n");
-    }
-
-    /// Y2 - pin
-    muxData = 0x64002;
-    boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG121), muxData);
-    if(boardStatus == BOARD_SOK) {
-        UART_printf("Y2 pin succesfully set in i2c mode!\r\n");
-    } else {
-        UART_printf("Y2 pin i2c mode switch failed..\r\n");
-    }
-
-    boardStatus = Board_pinmuxGetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG121), &muxData);
-    if(boardStatus == BOARD_SOK) {
-        UART_printf("Y2 pin fetched and checked succefully (settings: %X)\r\n", muxData);
-    } else {
-        UART_printf("Y2 pin fetched and checks failed..\r\n");
-    }
-
-    // logger_init();
     while(pImuOBJ == NULL) {
         UART_printf("Imu object corrupted...checkup required!\r\n");
     }
@@ -118,17 +83,6 @@ void imuReadTask(void *arg0, void *arg1) {
 //         vTaskDelay(pdMS_TO_TICKS(50)); // 50 ms
 
 //         SemaphoreP_post(args->imu_data_semaph);
-//     }
-// }
-
-// void logger_task(void* params) {
-//     char msg[LOGGER_MSG_MAXLEN];
-//     comms::Logger& logger = comms::Logger::instance();
-//     for (;;) {
-//         if (logger.read(msg, sizeof(msg)) > 0) {
-//             logger.send_log(msg);
-//         }
-//         vTaskDelay(pdMS_TO_TICKS(10));
 //     }
 // }
 

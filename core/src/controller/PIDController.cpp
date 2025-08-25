@@ -13,7 +13,7 @@ void C_PIDController::init(const DFC_t_PIDController_Params& params) {
 float64 C_PIDController::apply_deadband_expo(float64 v, float64 deadband, float64 expo) {
   // deadband
   if (std::fabs(v) < deadband) return 0.0;
-  // rescale after DB so  (deadband..1) → (0..1)
+  // rescale after DB so  (deadband..1) -> (0..1)
   float64 s = (std::fabs(v) - deadband) / (1.0 - deadband);
   s = std::clamp(s, 0.0, 1.0);
   // expo (smooth around center)
@@ -70,10 +70,13 @@ void C_PIDController::update(const DFC_t_EKF_State& ekfState,
   m_State.isArmed = rc_in.arm;
 
   // RC shaping
-  DFC_t_RcInputs rc = rc_in;
+  DFC_t_RcInputs rc = rc_in; // FAILSAFE LCOAL COPY
+
+  /// TODO: Deadband cleanup stacked, should be single stack..? -> sol: move to single deadband, but we keep for now low RC deadband compensation
   rc.roll  = apply_deadband_expo(rc.roll,  m_Params.rc_deadband, m_Params.rc_expo);
   rc.pitch = apply_deadband_expo(rc.pitch, m_Params.rc_deadband, m_Params.rc_expo);
   rc.yaw   = apply_deadband_expo(rc.yaw,   m_Params.rc_deadband, m_Params.rc_expo);
+
   // throttle deadband around min to avoid twitch
   if (rc.thr < 0.02) rc.thr = 0.0;
 
@@ -152,8 +155,8 @@ void C_PIDController::capture_pos_sp_if_needed(const DFC_t_EKF_State& ekfState, 
 
 void C_PIDController::position_hold_xy(const DFC_t_EKF_State& ekfState, const DFC_t_RcInputs& rc, float64 dt) {
   // stick → velocity setpoint offset
-  const float64 vx_cmd = rc.roll  * m_Params.max_vel_xy;   // right stick → +E
-  const float64 vy_cmd = -rc.pitch * m_Params.max_vel_xy;  // forward stick → +N
+  const float64 vx_cmd = rc.roll  * m_Params.max_vel_xy;   // right stick -> +E
+  const float64 vy_cmd = -rc.pitch * m_Params.max_vel_xy;  // forward stick -> +N
 
   // If sticks out of deadband, shift pos setpoint with velocity command
   const bool move = (std::fabs(rc.roll) > m_Params.rc_deadband) || (std::fabs(rc.pitch) > m_Params.rc_deadband);
@@ -167,7 +170,7 @@ void C_PIDController::position_hold_xy(const DFC_t_EKF_State& ekfState, const DF
   float64 eN = (float64)(m_State.pos_sp_NED[0] - ekfState.p[0]);
   float64 eE = (float64)(m_State.pos_sp_NED[1] - ekfState.p[1]);
 
-  // Outer m_Params + I → velocity setpoint
+  // Outer m_Params + I -> velocity setpoint
   m_State.vel_sp_NED[0] = std::clamp(m_Params.kp_pos_xy * eN + m_State.i_vel_xy[0], -m_Params.max_vel_xy, m_Params.max_vel_xy);
   m_State.vel_sp_NED[1] = std::clamp(m_Params.kp_pos_xy * eE + m_State.i_vel_xy[1], -m_Params.max_vel_xy, m_Params.max_vel_xy);
 
@@ -316,7 +319,7 @@ void C_PIDController::attitude_outer(const DFC_t_EKF_State& ekfState,
 
 void Controller::rate_inner(const float64 body_rate_sp[3], const float64 gyro[3], float64 dt,
                             float64 torque_cmd[3]) {
-  m_State.motors_saturated = false; // reset; will be set later
+  m_State.motors_saturated = false; // reset will be set later
 
   for (uint8 i=0;i<3;i++) {
     float64 err = body_rate_sp[i] - gyro[i];
@@ -329,7 +332,7 @@ void Controller::rate_inner(const float64 body_rate_sp[3], const float64 gyro[3]
 }
 
 void C_PIDController::mix_and_output(float64 thrust_cmd, const float64 torque_cmd[3], bool isArmed) {
-  // Quad-X mixing (FR, RR, RL, FL) → M1..M4
+  // Quad-X mixing (FR, RR, RL, FL) - M1..M4
   // Signs assume: M1 (FR) CCW, M2 (RR) CW, M3 (RL) CCW, M4 (FL) CW
   const float64 r = m_Params.mix_roll, p = m_Params.mix_pitch, y = m_Params.mix_yaw;
 
@@ -360,21 +363,18 @@ void C_PIDController::mix_and_output(float64 thrust_cmd, const float64 torque_cm
   u3 = constrain(u3, m_Params.min_thrust, m_Params.max_thrust);
   u4 = constrain(u4, m_Params.min_thrust, m_Params.max_thrust);
 
-  // When disarmed → stop motors
+  // When disarmed - stop motors
   if (!isArmed) {
     u1 = u2 = u3 = u4 = 0.0;
   }
 
-  // map [0..1] → microseconds
+  // map [0..1] - microseconds
   auto to_us = [&](float64 u)->uint16 {
     float64 x = constrain(u, 0.0, 1.0);
     return m_Params.pwm_min_us + (uint16)((m_Params.pwm_max_us - m_Params.pwm_min_us) * x + 0.5);
   };
-
-  motor_pwm::write_us(0, to_us(u1)); // FR
-  motor_pwm::write_us(1, to_us(u2)); // RR
-  motor_pwm::write_us(2, to_us(u3)); // RL
-  motor_pwm::write_us(3, to_us(u4)); // FL
+  //                       FR         RR         RL         FL
+  PWMgen::outputWrapper(to_us(u1), to_us(u2), to_us(u3), to_us(u4));
 }
 
 } // namespace ctrl

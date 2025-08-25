@@ -1,5 +1,5 @@
-#ifndef __DFC_TYPES_H
-#define __DFC_TYPES_H
+#ifndef DFC_TYPES_H
+#define DFC_TYPES_H
 
 #include "data_types.h"
 
@@ -88,6 +88,30 @@ typedef struct {
   DFC_t_Mode mode;      // flight mode
 } DFC_t_RcInputs;
 
+struct DFC_t_RcParams {
+    float64  ecap_clk_hz = 100e6;
+
+    // Limits
+    float64  thr_min_us   = 1000.0;
+    float64  thr_max_us   = 2000.0;
+    float64  center_us    = 1500.0;
+    float64  span_half_us = 500.0;
+
+    // Shaping
+    float64  deadband  = 0.01; // ~0.0 -> 0.02 (upper limit should not be passed mushy control)
+    float64  lpf_alpha = 0.20;
+
+    // Failsafe
+    uint32 timeout_ms = 120;
+
+    // Default mode until we set it with set_mode()
+    DFC_t_Mode default_mode = DFC_t_Mode::POS_HOLD;
+
+    // In case we want to switch the sign
+    bool invert_roll  = false;
+    bool invert_pitch = false;
+  };
+
 struct DFC_t_PIDController_Params {
   // Inner RATE PID (using gyro rad/s): torque commands in [-1,1]
   float64 kp_rate[3] = {0.15, 0.15, 0.12};
@@ -146,7 +170,7 @@ struct DFC_t_PIDControllerState {
   // Position hold setpoints
   float64 pos_sp_NED[3] = {0,0,0};  // [N,E,D]
   float64 vel_sp_NED[3] = {0,0,0};  // desired velocities
-  float64 yaw_sp = 0.0;             // yaw target [rad]
+  float64 yaw_sp = 0.0;                         // yaw target [rad]
   bool pos_sp_valid = false;
 
   // Integrators
@@ -154,13 +178,23 @@ struct DFC_t_PIDControllerState {
   float64 i_vel_xy[2] = {0,0};
   float64 i_vel_z = 0.0;
 
-  // For standstill recovery anti‑windup
+  // For standstill recovery
   bool motors_saturated = false;
 
   // Arming
   bool isArmed = false;
 };
 
+struct DFC_t_PWMgen_Params {
+  float64 ehrpwm_clk_hz  = 100e6;
+
+  // Output PWM frame rate (ESCs are on 50 Hz for 1–2 ms pulses)
+  uint32 freq_hz = 50;
+
+  // Output limits (µs) -> Last line of defense in case all else fails
+  uint32 min_us = 1000;
+  uint32 max_us = 2000;
+};
 
 typedef struct {
   imu::C_IMU *imu;

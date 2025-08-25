@@ -62,5 +62,6 @@ MEMORY
     C7X_DATA            (RWIX)	: ORIGIN = C7x_1_MEM_DATA_BASE     LENGTH = MEM_DATA_SIZE
     C7X_DDR_SPACE       (RWIX)	: ORIGIN = C7x_1_DDR_SPACE_BASE    LENGTH = DDR_SPACE_SIZE
     /*---------------------------------- Shared Region ----------------------------------------*/
-    SHARED_DDR_SPACE    (RWIX)	: ORIGIN = SHARED_DDR_SPACE_START  LENGTH = SHARED_DDR_SPACE_SIZE  
+    IPC_SHARED          (RWIX)  : ORIGIN = IPC_SHARED_START,       LENGTH = IPC_SHARED_SIZE
+    VISION_TELE_SHARED  (RWIX)  : ORIGIN = VISION_TELE_START,      LENGTH = VISION_TELE_SIZE
 } 

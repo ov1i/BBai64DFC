@@ -2,16 +2,24 @@
 #define UTILS_H
 #include "data_types.h"
 
-#define IMU_QUEUE_LENGTH                    (4)
 #define EKF_TASKSTACKSIZE                   (4096)
+
 #define IMU_TASKSTACKSIZE                   (2048)
-#define LOGGER_TASKSTACKSIZE                (1024)
+#define IMU_QUEUE_LENGTH                    (4)
+
 #define INIT_TASKSTACKSIZE                  (2048)
-#define LOGGER_BUFFER_SIZE                  (2048)
-#define LOGGER_MSG_MAXLEN                   (128)
 
 #define PADCONFIG_OFFSET_REG116             (116 * 4) // register number * 4 bytes per register
+#define PADCONFIG_OFFSET_REG119             (119 * 4) // register number * 4 bytes per register
+#define PADCONFIG_OFFSET_REG120             (120 * 4) // register number * 4 bytes per register
 #define PADCONFIG_OFFSET_REG121             (121 * 4) // register number * 4 bytes per register
+#define PADCONFIG_OFFSET_REG140             (140 * 4) // register number * 4 bytes per register
+#define PADCONFIG_OFFSET_REG142             (142 * 4) // register number * 4 bytes per register
+#define PADCONFIG_OFFSET_REG143             (143 * 4) // register number * 4 bytes per register
+#define PADCONFIG_OFFSET_REG89              (89 * 4)  // register number * 4 bytes per register
+#define PADCONFIG_OFFSET_REG90              (90 * 4)  // register number * 4 bytes per register
+#define PADCONFIG_OFFSET_REG94              (94 * 4)  // register number * 4 bytes per register
+#define PADCONFIG_OFFSET_REG95              (95 * 4)  // register number * 4 bytes per register
 
 const uint8 MPU9250_ADDRESS =                0x68;
 
@@ -68,6 +76,7 @@ const uint8  BMP280_CTRL_MES_REG =           0xF4;
 const uint8  BMP280_CONFIG_REG =             0xF5;
 const uint8  BMP280_T1_CALIB_ADDR =          0x88;
 const uint8  BMP280_PMSB_DATA_REGISTER =     0xF7;
+const uint8  BMP280_STATUS_REGISTER =        0xF3;
 
 const float64 ACC_LSB_PER_G =                8192.0;
 const float64 GYRO_LSB_PER_DPS =             65.5;
@@ -77,5 +86,9 @@ const float64 DEG2RAD =                      0.0174532925;
 
 const float64 acc_cvt_cst =                 GRAVITY / ACC_LSB_PER_G;
 const float64 gyro_cvt_cst =                (1.0 / GYRO_LSB_PER_DPS) * DEG2RAD;
+
+const uint32 INVALID_ENDPOINT =             0xFFFFu;
+const uint32 INVALID_REMOTEPROC =           0xFFFFu;
+
 
 #endif

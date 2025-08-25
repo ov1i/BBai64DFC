@@ -30,8 +30,12 @@
 #define C7x_1_ALLOCATED_START    C66x2_ALLOCATED_START  + CORE_TOTAL_SIZE   /* 0xA8000000 */
 #define RESV_ALLOCATED_START     C7x_1_ALLOCATED_START  + CORE_TOTAL_SIZE   /* 0xA9000000  - Reserved */
 
-#define SHARED_DDR_SPACE_START   RESV_ALLOCATED_START + CORE_TOTAL_SIZE     /* 0xAA000000 */
-#define SHARED_DDR_SPACE_SIZE    0x01C00000  /*  28MB */
+/* NOTE: 4MB left of shared memory (unallocated) -> 24MB used: 16MB(ipc) + 8MB(visu+tele) */
+#define IPC_SHARED_START         RESV_ALLOCATED_START + CORE_TOTAL_SIZE     /* 0xAA000000 */
+#define IPC_SHARED_SIZE          0x01000000  /* 16MB */
+
+#define VISION_TELE_START        IPC_SHARED_START + IPC_SHARED_SIZE         /* 0xAB000000 */
+#define VISION_TELE_SIZE         0x00800000  /* 8MB */
 
 /*--------------------------- MCU R5FSS0 CORE0 --------------------------*/
 #define MCU1_0_IPC_DATA_BASE     MCU1_0_ALLOCATED_START

@@ -5,12 +5,17 @@
 #include <rsc_table_types.h>
 #include <data_types.h>
 
-/* We keep this here just to clarify the main data type for our resource table */
 struct my_resource_table {
-    struct resource_table_base  base;
-    uint32                      offset[1];
-    // struct fw_rsc_carveout      carveout_shared_full;
+    struct resource_table_base base;
+    uint32 offset[2];
+
+    /* vdev: virtio-rpmsg, with two vrings */
+    struct fw_rsc_vdev        vdev_rpmsg;
+    struct fw_rsc_vdev_vring  vdev_vring0;
+    struct fw_rsc_vdev_vring  vdev_vring1;
+
+    /* carveout: images + telemetry fixed block */
+    struct fw_rsc_carveout    carveout_vision_tele;
 };
 
-
-#endif // RSC_TABLE_H
+#endif /* RSC_TABLE_H */

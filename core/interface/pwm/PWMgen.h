@@ -1,15 +1,25 @@
-#pragma once
+#ifndef DFC_PWM_H
+#define DFC_PWM_H
+
 #include <cstdint>
 
-namespace motor_pwm {
+namespace PWMgen {
 
-// Call once from Controller::init()
-void init(int pwm_min_us, int pwm_max_us);
+// Call once at boot
+static sint32 preInit(uint16 id);
+static bool init(const DFC_t_PWMgen_Params& parmas = DFC_t_PWMgen_Params());
+static void setupDividersPeriod(float64 tbclk_hz, uint32 freq_hz, uint16& clkdiv, uint16& hspdiv, uint16& tbprd, float64& counts_per_us);
+static void setupEPWM(volatile CSL_epwmRegs* pwm);
 
-// channel in [0..3], pulse width in microseconds
-void write_us(int channel, int pulse_us);
+// helpers
+static inline uint16 us_to_counts(uint32 us);
 
-// (optional) arm/disarm ESC line (e.g., set low)
-void disarm_all();
+// Update one motor’s pulse width in microseconds.
+static void write_motor_us(uint8 motorChannel, uint32 usec);
 
-} // namespace motor_pwm
+static inline uint32 clamp_us(uint32 val, uint32 lo, uint32 hi) { return val<lo?lo:(val>hi?hi:val); }
+static void outputWrapper(uint32 m0, uint32 m1, uint32 m2, uint32 m3);
+
+} // namespace PWMgen
+
+#endif
