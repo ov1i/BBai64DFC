@@ -1,18 +1,17 @@
 #ifndef DFC_RC_H
 #define DFC_RC_H
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include "dfc_types.h"
-#include "utils.h"
-
 extern "C" {
 #include <ti/csl/soc.h>
+#include <cstdint>
 }
 
-struct CSL_ecapRegs;
+#include <cmath>
+#include <algorithm>
+#include <dfc_types.h>
+#include <utils.h>
 
+struct CSL_ecapRegs;
 
 namespace rc {
 
@@ -66,7 +65,7 @@ private:
   // filtered normalized channels
   float64 m_NormThrottle{0.0};
   float64 m_NormRoll{0.0};
-  float64 m_NormlPitch{0.0};
+  float64 m_NormPitch{0.0};
 
   // arming gesture state
   uint32 m_ArmHold_ms{0};

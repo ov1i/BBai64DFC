@@ -7,7 +7,6 @@ namespace ctrl {
 void C_PIDController::init(const DFC_t_PIDController_Params& params) {
   m_Params = params;
   m_State = DFC_t_PIDControllerState{};
-  motor_pwm::init(m_Params.pwm_min_us, m_Params.pwm_max_us);
 }
 
 float64 C_PIDController::apply_deadband_expo(float64 v, float64 deadband, float64 expo) {
@@ -317,8 +316,7 @@ void C_PIDController::attitude_outer(const DFC_t_EKF_State& ekfState,
   body_rate_sp[2] = constrain(body_rate_sp[2], -m_Params.rc_max_rate[2], m_Params.rc_max_rate[2]);
 }
 
-void Controller::rate_inner(const float64 body_rate_sp[3], const float64 gyro[3], float64 dt,
-                            float64 torque_cmd[3]) {
+void C_PIDController::rate_inner(const float64 body_rate_sp[3], const float64 gyro[3], float64 dt, float64 torque_cmd[3]) {
   m_State.motors_saturated = false; // reset will be set later
 
   for (uint8 i=0;i<3;i++) {
@@ -373,6 +371,12 @@ void C_PIDController::mix_and_output(float64 thrust_cmd, const float64 torque_cm
     float64 x = constrain(u, 0.0, 1.0);
     return m_Params.pwm_min_us + (uint16)((m_Params.pwm_max_us - m_Params.pwm_min_us) * x + 0.5);
   };
+
+  m_State.m1 = to_us(u1);
+  m_State.m2 = to_us(u2);
+  m_State.m3 = to_us(u3);
+  m_State.m4 = to_us(u4);
+
   //                       FR         RR         RL         FL
   PWMgen::outputWrapper(to_us(u1), to_us(u2), to_us(u3), to_us(u4));
 }

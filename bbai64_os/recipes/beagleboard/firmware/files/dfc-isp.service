@@ -1,0 +1,15 @@
+[Unit]
+Description=DFC ISP
+After=multi-user.target syslog.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/dfc-isp.conf
+ExecStart=/usr/bin/isp ${DFC_ISP_VIDEO} --rpmsg-name=${DFC_ISP_RPMSG_NAME}
+Restart=always
+RestartSec=2
+TimeoutStartSec=0
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

@@ -16,11 +16,15 @@ extern "C" {
 
 namespace baro {
 
+static inline uint64 now_ns() {
+  return (uint64)TimerP_getTimeInUsecs() * 1000ull;
+}
+
 C_BMP280::C_BMP280() { std::memset(this, 0, sizeof(*this)); }
 
 bool C_BMP280::init() {
   if (!m_i2cState) {
-    m_i2cState = m_i2cHandler.init(2, I2C_400kHz);
+    m_i2cState = m_i2cHandler.init(4, I2C_400kHz);
     if (!m_i2cState) {
       return false;
     }
@@ -29,7 +33,7 @@ bool C_BMP280::init() {
   uint8 temp[2] = {BMP280_RST_REG, 0xB6};
   m_i2cHandler.writeRegSingletVal(BMP280_ADDRESS, temp);
 
-  if (!updateInternalCalib()) {
+  if (!updateInternalCalibReg()) {
     UART_printf("[BMP280] Calib read FAILED\r\n");
     return false;
   }
@@ -75,6 +79,8 @@ bool C_BMP280::update() {
   sint32 rawTemp = (sint32)((tempBuffer[3] << 12) | (tempBuffer[4] << 4) | (tempBuffer[5] >> 4));
   internalValCompensation(rawTemp, rawPressure);
   computeAltitude();
+  m_data.ts_ns = now_ns();
+
   return true;
 }
 
@@ -104,7 +110,7 @@ void C_BMP280::internalValCompensation(sint32 rawTempData, sint32 rawPressureDat
   sint32 var2 = (((((rawTempData >> 4) - ((sint32)m_data.calibration_data.dig_T1)) * ((rawTempData >> 4) - ((sint32)m_data.calibration_data.dig_T1))) >> 12) * ((sint32)m_data.calibration_data.dig_T3)) >> 14;
   sint32 fineResolution = var1 + var2;
   sint32 processedTemp = (fineResolution * 5 + 128) >> 8; // 0.01 C
-  m_data.temp = (float64)T / 100.0;
+  m_data.temp = (float64)processedTemp / 100.0;
 
   // pressure
   sint64 var1p = ((sint64)fineResolution) - 128000;
@@ -119,7 +125,7 @@ void C_BMP280::internalValCompensation(sint32 rawTempData, sint32 rawPressureDat
   }
 
   sint64 processedPress = 1048576 - rawPressureData;
-  processedPress = (((p << 31) - var2p) * 3125) / var1p;
+  processedPress = (((processedPress << 31) - var2p) * 3125) / var1p;
   var1p = (((sint64)m_data.calibration_data.dig_P9) * (processedPress >> 13) * (processedPress >> 13)) >> 25;
   var2p = (((sint64)m_data.calibration_data.dig_P8) * processedPress) >> 19;
   processedPress = ((processedPress + var1p + var2p) >> 8) + (((sint64)m_data.calibration_data.dig_P7) << 4);

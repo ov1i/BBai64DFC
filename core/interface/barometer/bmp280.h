@@ -2,13 +2,14 @@
 #define BMP280_H
 
 #include "i2c/i2c_helper.h"
-#include <dfc_types.h>
-#include <utils.h>
 
 extern "C" {
-#include <stddef.h>
-#include <stdint.h>
+  #include <stddef.h>
+  #include <stdint.h>
 }
+
+#include <dfc_types.h>
+#include <utils.h>
 
 namespace baro {
 
@@ -39,9 +40,11 @@ public:
     return true;
   }
 
+  const DFC_t_BMP280_Data& getData() const { return m_data; }
+
 private:
   bool updateInternalCalibReg();
-  void internalValCompensation(sint32 rawTempData, sint32 rawTempData);
+  void internalValCompensation();
   void computeAltitude();
 
   DFC_t_BMP280_Data m_data;

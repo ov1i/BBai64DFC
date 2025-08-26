@@ -62,12 +62,23 @@ static inline void yuyv2y(const uint8* yuyv, size_t yuyv_bytes, uint8* yCh, size
   for(size_t px=0,i=0; px<total; ++px, i+=2) yCh[px] = yuyv[i];
 }
 
+static inline void yuyv2yPadded(const uint8* yuyv, uint32 width, uint32 height, uint32 bytesperline, uint8* yCh, uint32 y_stride) {
+  for(uint32 r = 0; r < height; ++r) {
+    const uint8* src = yuyv + r * bytesperline;
+    uint8* dst = yCh + r * y_stride;
+    // copy Y from YUYV
+    for(uint32 c = 0, i = 0; c < width; ++c, i += 2) {
+      dst[c] = src[i];
+    }
+  }
+}
+
 int main(int argc, char** argv){
   const char* camDev = (argc>1)? argv[1] : "/dev/video0";
-  const char* rpmsgName = "a72_to_c66x";
+  const char* rpmsgName = "c66x_from_a72";
   for(int i=1;i<argc;i++) {
-    if(strncmp(argv[i],"--rpmsg-name=",12)==0) {
-      rpmsgName = argv[i]+12;
+    if(strncmp(argv[i],"--rpmsg-name=",13)==0) {
+      rpmsgName = argv[i]+13;
     }
   }
   signal(SIGINT, on_sigint);
@@ -148,10 +159,10 @@ int main(int argc, char** argv){
       break; 
     }
 
-    if(fmt.fmt.pix.pixelformat!=V4L2_PIX_FMT_YUYV) { 
-      fprintf(stderr,"Driver refused YUYV\n"); 
-      break; 
-    }
+    uint32 cam_w = fmt.fmt.pix.width;
+    uint32 cam_h = fmt.fmt.pix.height;
+    uint32 yuyv_bpl = fmt.fmt.pix.bytesperline ? fmt.fmt.pix.bytesperline : cam_w * 2;
+    bool tightly_packed = (yuyv_bpl == cam_w * 2);
 
     v4l2_streamparm parm{}; 
     parm.type=V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -226,7 +237,10 @@ int main(int argc, char** argv){
     uint8 slot = SLOT_CURR;
 
     while(g_run) {
-      pollfd pfd{.fd=vfd,.events=POLLIN};
+      pollfd pfd{};
+      pfd.fd=vfd;
+      pfd.events=POLLIN;
+
       int pr=poll(&pfd,1,1000);
       if(pr<0) { 
         if(errno==EINTR) continue; 
@@ -249,16 +263,21 @@ int main(int argc, char** argv){
         break;
       }
 
-      const uint8* yuyv = (const uint8*)buffers[b.index].start;
+      const uint64 t0 = now_ns();
+      pImageHeader[slot]->seqLock++; 
+      __sync_synchronize();
 
-      const uint64 t0=now_ns();
-      pImageHeader[slot]->seqLock++; __sync_synchronize();
-
-      if(b.bytesused>=yuyvSize) {
-        yuyv2y(yuyv,yuyvSize,img[slot],getImageDataSize());
+      if (b.bytesused >= (size_t)yuyv_bpl * cam_h) {
+        if (tightly_packed) {
+          yuyv2y((const uint8*)buffers[b.index].start, (size_t)cam_w * cam_h * 2, img[slot], getImageDataSize());
+        } else {
+          // row-wise for padded lines
+          yuyv2yPadded((const uint8*)buffers[b.index].start, cam_w, cam_h, yuyv_bpl, img[slot], pImageHeader[slot]->stride /* = cam_w */);
+        }
       } else {
-        memset(img[slot],0,getImageDataSize());
+        memset(img[slot], 0, getImageDataSize());
       }
+
 
       const uint64 t1=now_ns();
       pImageHeader[slot]->ts_ns=t1; 

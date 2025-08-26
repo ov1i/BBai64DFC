@@ -65,7 +65,7 @@ static void setupDividersPeriod(float64 tbclk_hz, uint32 freq_hz, uint16& clkdiv
   const uint16 hspdiv_true_vals[8]   = {1,2,4,6,8,10,12,14};
 
   float64 best_err = 1e99;
-  uint16 best_clkdiv=1, best_hspdiv=1, best_tbprd=0;
+  uint16 best_clkdiv = 1, best_hspdiv = 1, best_tbprd = 0;
 
   const float64 period_s = 1.0 / (float64)freq_hz;
   for (uint8 i=0;i<4;i++) {
@@ -75,12 +75,12 @@ static void setupDividersPeriod(float64 tbclk_hz, uint32 freq_hz, uint16& clkdiv
       if (counts_per_prd > 65535.0) continue;           // won’t fit :O
       if (counts_per_prd < 100.0)  continue;            // too small  -_-
       // I guess in between is perfect 0_0
-      float64 err = std::abs(prd - 40000.0);
+      float64 err = std::abs(counts_per_prd - 40000.0);
       if (err < best_err) {
         best_err  = err;
-        best_clkdiv   = clkdiv_true_vals[i];
-        best_hspdiv   = hspdiv_true_vals[j];
-        best_tbprd= (uint16)(prd + 0.5); // round to the nearest (pretty little trick, to avoid std::round)
+        best_clkdiv = clkdiv_true_vals[i];
+        best_hspdiv = hspdiv_true_vals[j];
+        best_tbprd = (uint16)(counts_per_prd + 0.5); // round to the nearest (pretty little trick, to avoid std::round)
       }
     }
   }
@@ -167,31 +167,31 @@ static bool init(const DFC_t_PWMgen_Params& params) {
   g_params = params;
   
   uint32 muxData = 0x10006h;
-  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG89), muxData) != BOARD_SOK) {
+  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG89), muxData) == BOARD_SOK) {
     UART_printf("V29 pin succesfully set in EHRPWM output mode (settings: %X)!\r\n", muxData);
-    return false;
   } else {
     UART_printf("V29 pin EHRPWM output mode switch failed..\r\n");
-  }
-  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG90), muxData) != BOARD_SOK) {
-    UART_printf("V27 pin succesfully set in ECAP input mode (settings: %X)!\r\n", muxData);
     return false;
+  }
+  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG90), muxData) == BOARD_SOK) {
+    UART_printf("V27 pin succesfully set in ECAP input mode (settings: %X)!\r\n", muxData);
   } else {
     UART_printf("V27 pin EHRPWM output mode switch failed..\r\n");
+    return false;
   }
 
-  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG94), muxData) != BOARD_SOK) {
+  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG94), muxData) == BOARD_SOK) {
     UART_printf("U27 pin succesfully set in EHRPWM output mode (settings: %X)!\r\n", muxData);
-    return false;
   } else {
     UART_printf("U27 pin EHRPWM output mode switch failed..\r\n");
+    return false;
   }
 
-  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG95), muxData) != BOARD_SOK) {
+  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG95), muxData) == BOARD_SOK) {
     UART_printf("U24 pin succesfully set in EHRPWM output mode (settings: %X)!\r\n", muxData);
-    return false;
   } else {
     UART_printf("U24 pin EHRPWM output mode switch failed..\r\n");
+    return false;
   }
 
   // Power the two EHRPWM instances we use
@@ -206,8 +206,8 @@ static bool init(const DFC_t_PWMgen_Params& params) {
   volatile CSL_epwmRegs* pPWMInst2 = (volatile CSL_epwmRegs*)CSL_EHRPWM2_EPWM_BASE;
 
   // Setup both modules
-  setupEPWM(pwmInst0);
-  setupEPWM(pwmInst2);
+  setupEPWM(pPWMInst0);
+  setupEPWM(pPWMInst2);
 
   // Channel map
   g_map[0] = { pPWMInst0, true  };
@@ -238,7 +238,7 @@ static void write_motor_us(uint8 ch, uint32 usec) {
   }
 
   uint16 counts = us_to_counts(usec);
-  volatile CSL_ehrpwmRegs* pwm = g_map[ch].base;
+  volatile CSL_epwmRegs* pwm = g_map[ch].base;
 
   if (g_map[ch].isA) {
     pwm->CMPA = counts;

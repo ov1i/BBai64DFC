@@ -53,6 +53,8 @@ struct DFC_t_EKF_Params{
   float32 mag_std = 0.8F; // arbitrary vector std [uT or normalized]; tune after calib
   float32 flow_vel_std = 0.25F; // m/s at ~1 m height; scaled with height below
 
+  float64 focalLengthX = 532;
+  float64 focalLengthY = 660;
   // Earth magnetic field in NED (normalized or in uT) – set after a quick
   // on-ground calibration
   float32 magN[3] = {0.25f, 0.02f, 0.43f}; // direction, magnitude not critical if std is large
@@ -69,8 +71,17 @@ typedef struct {
   // Error-state covariance P (15x15), row-major
   float64 P[15 * 15];
 
+  // State of the optical flow (saves us lot's of headaches for telemetry)
+  float64 oflow_u, oflow_v, oflow_quality;
+  uint8 oflow_valid;
+
   uint64 t_ns;
 } DFC_t_EKF_State;
+
+typedef struct {
+  uint64 ts; 
+  float64 w[3]; // bias-corrected rad/s on body/cam frame
+} DFC_t_GyroCorrect_Container;
 
 enum class DFC_t_Mode : uint8 {
   ACRO = 0,       // rate control only
@@ -180,6 +191,7 @@ struct DFC_t_PIDControllerState {
 
   // For standstill recovery
   bool motors_saturated = false;
+  uint16 m1 = 0, m2 = 0, m3 = 0, m4 = 0;
 
   // Arming
   bool isArmed = false;
@@ -195,18 +207,6 @@ struct DFC_t_PWMgen_Params {
   uint32 min_us = 1000;
   uint32 max_us = 2000;
 };
-
-typedef struct {
-  imu::C_IMU *imu;
-  QueueP_Handle imu_data_queue;
-  SemaphoreP_Handle imu_data_semaph;
-} DFC_t_IMU_TaskArgs;
-
-typedef struct {
-  // EKF *ekf;
-  QueueP_Handle imu_data_queue;
-  SemaphoreP_Handle imu_data_semaph;
-} DFC_t_EKF_TaskArgs;
 
 #endif
 

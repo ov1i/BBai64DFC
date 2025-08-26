@@ -8,6 +8,7 @@ extern "C" {
 #include <ti/drv/i2c/soc/i2c_soc.h>
 }
 #include <dfc_types.h>
+#include <utils.h>
 
 #ifdef __cplusplus
 

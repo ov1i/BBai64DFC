@@ -1,15 +1,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include <c6x.h>
 #include "common/types/shared_types.h" 
 #include "opticalflow/oflow_c66x.h"
 #include "comms/rpmsg_helper.hpp"
-
-// If set MAR to make baseAddr window non-cacheable, keep this as a no-op.
-// Otherwise Cache_inv() before reading shared DDR. (pref MAR mark)
-static inline void flushCache(const void* pImageHeader, uint32 size) {
-    Cache_inv((void *)pImageHeader, (size_t)size, (uint16)Cache_Type_ALL, TRUE);
-}
 
 static inline volatile DFC_t_ImageHeader* getpImageHeader(uint8 idx) {
     return (volatile DFC_t_ImageHeader*)(uintptr_t)getpMemAddr(idx, width, height);
@@ -23,23 +18,19 @@ static void copyImageAtomically(uint8 slot, uint8* dst, DFC_t_ImageHeader* outH)
     volatile uint8* pImageData = getpImageData(slot);
     const uint32 imageSize = getImgDataSize(width, height);
 
-    // flush cache for now
-    flushCache((const void*)pImageHeader, sizeof(*pImageHeader));
-    flushCache((const void*)pImageData, imageSize);
-
     for(;;) {
         uint32 seqLock0 = pImageHeader->seqLock;
-        __sync_synchronize();
+        _mfence();
         if(seqLock0 & 1u) {
             continue; // writer in progress
         }
 
         memcpy(dst, (const void*)pImageData, imageSize);
-        __sync_synchronize();
+        _mfence();
 
         DFC_t_ImageHeader tmp{};
         memcpy(&tmp, (const void*)pImageHeader, sizeof(tmp));
-        __sync_synchronize();
+        _mfence();
         uint32 seqLock1 = tmp.seqLock;
 
         if(seqLock0 == seqLock1 && !(seqLock1 & 1u)) {
@@ -56,10 +47,10 @@ int main(void) {
     C_RPMsgHelper link_to_R5F;    // send DFC_t_MsgOpticalFlow to R5F
 
     // A72 -> C66x
-    link_from_A72.open(DFC_t_ProcIDs::A72, "a72_to_c66x", nullptr);
+    link_from_A72.open(DFC_t_ProcIDs::A72, "c66x_from_a72", nullptr);
 
     // C66x -> R5F
-    link_to_R5F.open(IPC_R5FSS0_0, "c66x_to_r5f", "r5f_to_c66x");
+    link_to_R5F.open(DFC_t_ProcIDs::R5F, "c66x_to_r5f", "r5f_from_c66x");
     for(uint8 i = 0; i < 50 && !link_to_R5F.isDstReady(); ++i) {
       link_to_R5F.tryResolve(100);
     }
@@ -121,11 +112,11 @@ int main(void) {
 
         // Prepare msg for R5F
         DFC_t_MsgOpticalFlow msg{};
-        msg.magic       = OF_MAGIC;
+        msg.magic       = DFC_FLOW_RAW_MAGIC;
         msg.ts_prev_ns  = prev_ts_ns;
         msg.ts_curr_ns  = currentImageHeader.ts_ns;
-        msg.u_px_per_s  = flow.valid ? flow.u_px_s : 0.0;
-        msg.v_px_per_s  = flow.valid ? flow.v_px_s : 0.0;
+        msg.u_px_per_s  = flow.valid ? flow.u_px_per_s : 0.0;
+        msg.v_px_per_s  = flow.valid ? flow.v_px_per_s : 0.0;
         msg.quality     = flow.valid ? flow.quality : 0.0;
         msg.width       = (uint16)width;
         msg.height      = (uint16)height;

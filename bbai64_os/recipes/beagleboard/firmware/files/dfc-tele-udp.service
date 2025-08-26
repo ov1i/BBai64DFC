@@ -1,0 +1,16 @@
+[Unit]
+Description=DFC Telemetry UDP TX
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/dfc-tele.conf
+ExecStartPre=/usr/sbin/dfc-wait-net ${DFC_NET_IF} ${DFC_HOST}
+ExecStart=/usr/bin/telemetry_tx ${DFC_HOST} ${DFC_TELEM_PORT} --rpmsg-name=${DFC_TELEM_RPMSG_NAME}
+Restart=always
+RestartSec=2
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
