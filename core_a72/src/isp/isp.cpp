@@ -75,7 +75,7 @@ static inline void yuyv2yPadded(const uint8* yuyv, uint32 width, uint32 height, 
 
 int main(int argc, char** argv){
   const char* camDev = (argc>1)? argv[1] : "/dev/video0";
-  const char* rpmsgName = "a72_to_c66x";
+  const char* rpmsgName = "c66x_from_a72";
   for(int i=1;i<argc;i++) {
     if(strncmp(argv[i],"--rpmsg-name=",13)==0) {
       rpmsgName = argv[i]+13;

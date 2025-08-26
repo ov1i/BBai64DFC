@@ -53,8 +53,8 @@ sint32 C_RPMsgHelper::tryResolve(uint32 timeout_us) {
   uint32 tmpRENDP = 0xFFFFFFFFu;
   uint32 tmpRPROC = INVALID_ENDPOINT;
   if (RPMessage_getRemoteEndPt(static_cast<uint32>(m_remote_proc), m_remoteName, &tmpRPROC, &tmpRENDP, timeout_us) == IPC_SOK) {
-    m_remote_proc  = static_cast<uint16>(foundProc);
-    m_remote_endpt = foundEndp;
+    m_remote_proc  = static_cast<uint16>(tmpRPROC);
+    m_remote_endpt = tmpRENDP;
 
     return 0;
   }

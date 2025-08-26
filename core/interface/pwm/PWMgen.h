@@ -1,7 +1,17 @@
 #ifndef DFC_PWM_H
 #define DFC_PWM_H
 
+extern "C" {
+#include <stdint.h>
 #include <cstdint>
+#include <stddef.h>
+#include <ti/csl/csl.h>
+#include <ti/csl/soc.h>
+#include <ti/csl/cslr.h>
+#include <ti/csl/cslr_epwm.h>
+}
+#include <utils.h>
+#include <dfc_types.h>
 
 namespace PWMgen {
 

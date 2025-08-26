@@ -8,6 +8,8 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <memory>
+#include <errno.h>
 
 #include "common/types/data_types.h"
 #include "common/types/shared_types.h"

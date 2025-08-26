@@ -14,6 +14,10 @@ extern "C" {
 }
 
 namespace imu {
+static inline uint64 now_ns() {
+  return (uint64)TimerP_getTimeInUsecs() * 1000ull;
+}
+
 C_IMU::C_IMU() {
   memset(&m_data, 0, sizeof(m_data));
   memset(&m_i2cHandler, 0, sizeof(m_i2cHandler));
@@ -34,19 +38,17 @@ bool C_IMU::init() {
 
   // Check MPU WHO_AM_I
   UART_printf("[DEBUG]: WHO_AM_I...[ CHECKING ]\r\n");
-  if (!m_i2cHandler.rw(MPU9250_ADDRESS, &MPU9250_WHO_AM_I_GENERAL, 1, &temp,
-                       1) ||
-      temp != 0x71) {
+  if (!m_i2cHandler.rw(MPU9250_ADDRESS, &MPU9250_WHO_AM_I_GENERAL, 1, &temp, 1) || temp != 0x71) {
     UART_printf("[DEBUG]: WHO_AM_I... [ FAILED ]: 0x%02X\r\n", temp);
     return false;
   }
-  UART_printf("[DEBUG]: WHO_AM_I...[ SUCCESS ]: %\r\n", temp);
+  UART_printf("[DEBUG]: WHO_AM_I...[ SUCCESS ]: 0x%02X\r\n", temp);
 
   // Set G+A sample rate divider = 4
   UART_printf("[DEBUG]: Clock source...[ SETTING ]\r\n");
   reg_n_data[0] = MPU9250_SMPRT_DIV;
   reg_n_data[1] = 4;
-  if ( //! m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
+  if ( ! m_i2cHandler.writeRegSingletVal(MPU9250_ADDRESS, reg_n_data) ||
       !m_i2cHandler.rw(MPU9250_ADDRESS, &reg_n_data[0], 1, &temp, 1) ||
       temp != 4) {
     UART_printf("[DEBUG]: Clock source...[ FAILED ]\r\n");
@@ -213,6 +215,7 @@ bool C_IMU::update() {
   // Temp
   sint16 temp_raw = (rbuffer[6] << 8) | rbuffer[7];
   m_data.temp = static_cast<float64>(temp_raw);
+  m_data.ts_ns = now_ns();
 
   // Mag
   uint8 status1;
@@ -242,13 +245,10 @@ bool C_IMU::update() {
   m_data.my = (float64)((mag_data[3] << 8) | mag_data[2]) * MAG_UT_PER_LSB * m_data.mag_adjustment[1];
   m_data.mz = (float64)((mag_data[5] << 8) | mag_data[4]) * MAG_UT_PER_LSB * m_data.mag_adjustment[2];
 
+  m_data.ts_ns = now_ns();
   m_data.mag_rdy = true;
 
   return true;
-}
-
-void C_IMU::getCurrentRawData(DFC_t_MPU9250_Data *rawData) {
-  rawData = &m_data;
 }
 
 } // namespace imu

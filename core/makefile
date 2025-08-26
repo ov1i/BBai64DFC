@@ -17,6 +17,12 @@ COMP_LIST_COMMON = $(PDK_COMMON_FREERTOS_COMP)
 
 SRCS_COMMON += r5f/rsc_table.c 
 SRCS_COMMON_CPP += rtos_main.cpp i2c/i2c_helper.cpp imu/mpu9250.cpp ekf/ekf.cpp barometer/bmp280.cpp controller/PIDcontroller.cpp pwm/PWMgen.cpp
+SRCS_COMMON_CPP += controller/rcIA6.cpp comms/RPMsg_helper.cpp
+
+ifeq ($(ISA), c66)
+  INCDIR += $(IPC_COMMON_PATH)/$(SOC_DIR)/$(BUILD_OS_TYPE)/
+  SRCS_COMMON += c66_cache_mar.c
+endif
 
 EXTERNAL_LNKCMD_FILE_LOCAL = $(PDK_INSTALL_PATH)/ti/drv/ipc/examples/DFC/src/common/clusters/$(ISA)/lnk_$(ISA)_$(CORE).lds
 APPEND_LNKCMD_FILE += $(PDK_INSTALL_PATH)/ti/drv/ipc/examples/DFC/src/common/clusters/memory_map_ddr.cmd

@@ -1,4 +1,4 @@
-#include "RCInputECAP.hp"
+#include "controller/RCInputECAP.h"
 
 extern "C" {
 #include <ti/drv/sciclient/include/tisci/tisci_devices.h>
@@ -23,9 +23,9 @@ static inline uint32 now_ms() {
 sint32 C_RcIA6::preInit(uint16 id) {
   Sciclient_ConfigPrms_t config; 
   Sciclient_configPrmsInit(&config);
-  int32_t st = Sciclient_init(&config);
-  if (st && st != SCICLIENT_EALREADY_OPEN)
-    return st;
+  sint32 status = Sciclient_init(&config);
+  if (status && status != SCICLIENT_EALREADY_OPEN)
+    return status;
 
   struct tisci_msg_set_device_req req = { 0 };
   struct tisci_msg_set_device_resp resp = { 0 };
@@ -50,7 +50,7 @@ sint32 C_RcIA6::preInit(uint16 id) {
   status = Sciclient_service(&reqParam, &respParam);
   if (status != CSL_PASS) return status;
 
-  if ((sresp.flags & TISCI_MSG_FLAG_ACK) != TISCI_MSG_FLAG_ACK) {
+  if ((respParam.flags & TISCI_MSG_FLAG_ACK) != TISCI_MSG_FLAG_ACK) {
     return CSL_EFAIL;
   }
   
@@ -100,26 +100,26 @@ bool C_RcIA6::init(const DFC_t_RcParams &params) {
     m_Data = {};
     m_Data.mode = params.default_mode;
 
-  uint32 muxData = 0x30000h;
-  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG140), muxData) != BOARD_SOK) {
+  uint32 muxData = 0x30000u;
+  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG140), muxData) == BOARD_SOK) {
     UART_printf("U2 pin succesfully set in ECAP input mode (settings: %X)!\r\n", muxData);
-    return false;
   } else {
     UART_printf("U2 pin ECAP input mode switch failed..\r\n");
-  }
-  muxData = 0x30001h;
-  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG142), muxData) != BOARD_SOK) {
-    UART_printf("V6 pin succesfully set in ECAP input mode (settings: %X)!\r\n", muxData);
     return false;
+  }
+  muxData = 0x30001u;
+  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG142), muxData) == BOARD_SOK) {
+    UART_printf("V6 pin succesfully set in ECAP input mode (settings: %X)!\r\n", muxData);
   } else {
     UART_printf("V6 pin ECAP input mode switch failed..\r\n");
+    return false;
   }
 
-  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG143), muxData) != BOARD_SOK) {
+  if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG143), muxData) == BOARD_SOK) {
     UART_printf("V5 pin succesfully set in ECAP input mode (settings: %X)!\r\n", muxData);
-    return false;
   } else {
     UART_printf("V5 pin ECAP input mode switch failed..\r\n");
+    return false;
   }
 
   // Enable ECAP0/1/2 clocks
@@ -138,7 +138,7 @@ bool C_RcIA6::init(const DFC_t_RcParams &params) {
   // Prime filters
   m_NormThrottle = fmap(1500.0, m_Params.thr_min_us, m_Params.thr_max_us, 0.0, 1.0);
   m_NormRoll = 0.0;
-  m_NormlPitch = 0.0;
+  m_NormPitch = 0.0;
 
   m_LastStep_ms = now_ms();
   m_ArmHold_ms = 0;
@@ -209,11 +209,11 @@ void C_RcIA6::update() {
 
     m_NormThrottle = lpf(m_NormThrottle, thr_raw, m_Params.lpf_alpha);
     m_NormRoll = lpf(m_NormRoll, roll_raw, m_Params.lpf_alpha);
-    m_NormlPitch = lpf(m_NormlPitch, pitch_raw, m_Params.lpf_alpha);
+    m_NormPitch = lpf(m_NormPitch, pitch_raw, m_Params.lpf_alpha);
 
     m_Data.thr = clampf(m_NormThrottle, 0.0, 1.0);
     m_Data.roll = clampf(m_NormRoll, -1.0, 1.0);
-    m_Data.pitch = clampf(m_NormlPitch, -1.0, 1.0);
+    m_Data.pitch = clampf(m_NormPitch, -1.0, 1.0);
     m_Data.yaw = 0.0;
 
     if (!m_Data.arm) {

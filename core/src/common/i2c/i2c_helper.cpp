@@ -49,45 +49,6 @@ bool C_I2C::startModule(uint32 id) {
 }
 
 bool C_I2C::preinit(uint32 instance) {
-  if(!startModule(TISCI_DEV_I2C4)) return false;
-  if(!startModule(TISCI_DEV_I2C6)) return false;
-
-  /// AA3 - pin
-  muxData = 0x64002;
-  boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG116), muxData);
-  if(boardStatus == BOARD_SOK) {
-    UART_printf("AA3 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
-  } else {
-    UART_printf("AA3 pin i2c mode switch failed..\r\n");
-  }
-
-  /// Y2 - pin
-  muxData = 0x64002;
-  boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG121), muxData);
-  if(boardStatus == BOARD_SOK) {
-    UART_printf("Y2 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
-  } else {
-    UART_printf("Y2 pin i2c mode switch failed..\r\n");
-  }
-
-  /// Y5 - pin
-  muxData = 0x64002;
-  boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG120), muxData);
-  if(boardStatus == BOARD_SOK) {
-    UART_printf("Y5 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
-  } else {
-    UART_printf("Y5 pin i2c mode switch failed..\r\n");
-  }
-
-  /// Y1 - pin
-  muxData = 0x64002;
-  boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG119), muxData);
-  if(boardStatus == BOARD_SOK) {
-    UART_printf("Y1 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
-  } else {
-    UART_printf("Y1 pin i2c mode switch failed..\r\n");
-  }
-
   uint32 baseAddr;
   I2C_HwAttrs i2cCfg;
   sint32 retVal = CSL_SOK;
@@ -107,12 +68,48 @@ bool C_I2C::preinit(uint32 instance) {
     break;
   case 4:
     baseAddr = CSL_I2C2_CFG_BASE;
+    if(!startModule(TISCI_DEV_I2C4)) return false;
+    /// Y5 - pin
+    muxData = 0x64002;
+    boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG120), muxData);
+    if(boardStatus == BOARD_SOK) {
+      UART_printf("Y5 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+    } else {
+      UART_printf("Y5 pin i2c mode switch failed..\r\n");
+      return false;
+    }
+    /// Y1 - pin
+    boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG119), muxData);
+    if(boardStatus == BOARD_SOK) {
+      UART_printf("Y1 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+    } else {
+      UART_printf("Y1 pin i2c mode switch failed..\r\n");
+      return false;
+    }
     break;
   case 5:
     baseAddr = CSL_I2C3_CFG_BASE;
     break;
   case 6:
     baseAddr = CSL_I2C4_CFG_BASE;
+    if(!startModule(TISCI_DEV_I2C6)) return false;
+    /// AA3 - pin
+    muxData = 0x64002;
+    boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG116), muxData);
+    if(boardStatus == BOARD_SOK) {
+      UART_printf("AA3 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+    } else {
+      UART_printf("AA3 pin i2c mode switch failed..\r\n");
+      return false;
+    }
+    /// Y2 - pin
+    boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG121), muxData);
+    if(boardStatus == BOARD_SOK) {
+      UART_printf("Y2 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+    } else {
+      UART_printf("Y2 pin i2c mode switch failed..\r\n");
+      return false;
+    }
     break;
   default:
     retVal = CSL_EFAIL;

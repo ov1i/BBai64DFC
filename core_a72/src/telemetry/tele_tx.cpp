@@ -1,11 +1,12 @@
 #include <arpa/inet.h>
+#include <cerrno>
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -13,29 +14,34 @@
 #include "common/types/data_types.h"
 #include "common/types/shared_types.h"
 
-static int rpmsg_open(const char* svc_name){
+static int rpmsg_open(const char* svc_name) {
   DIR* d = opendir("/sys/class/rpmsg");
-  if(!d) return -1;
-  struct dirent* e; 
-  char path[256], name[128], devnode[128];
+  if (!d) return -1;
 
-  while((e=readdir(d))){
-    if(strncmp(e->d_name,"rpmsg",5)!=0) continue;
-    snprintf(path,sizeof(path),"/sys/class/rpmsg/%s/name", e->d_name);
+  struct dirent* e;
+  char path[256];
+  char name[128];
+  char devnode[128];
 
-    FILE* f = fopen(path,"r");
-    if(!f) continue;
-    
-    if(!fgets(name,sizeof(name),f)){ 
-      fclose(f); 
-      continue; 
+  while ((e = readdir(d))) {
+    if (strncmp(e->d_name, "rpmsg", 5) != 0) continue;
+
+    snprintf(path, sizeof(path), "/sys/class/rpmsg/%s/name", e->d_name);
+    FILE* f = fopen(path, "r");
+    if (!f) continue;
+
+    if (!fgets(name, sizeof(name), f)) {
+      fclose(f);
+      continue;
     }
     fclose(f);
-    name[strcspn(name,"\r\n")] = 0;
-    
-    if(strcmp(name, svc_name)==0){
-      snprintf(devnode,sizeof(devnode),"/dev/%s", e->d_name);
-      int fd = open(devnode, O_RDWR|O_CLOEXEC);
+
+    // strip newline
+    name[strcspn(name, "\r\n")] = 0;
+
+    if (strcmp(name, svc_name) == 0) {
+      snprintf(devnode, sizeof(devnode), "/dev/%s", e->d_name);
+      int fd = open(devnode, O_RDONLY | O_CLOEXEC); // read-only is enough
       closedir(d);
       return fd;
     }
@@ -45,109 +51,86 @@ static int rpmsg_open(const char* svc_name){
 }
 
 int main(int argc, char** argv) {
-    if(argc < 2) {
-        fprintf(stderr, "Usage: %s <host_ip> [port=5005] [--rpmsg-name=r5f_to_a72]\n", argv[0]);
-        return 1;
+  if (argc < 2) {
+    std::fprintf(stderr,
+      "Usage: %s <host_ip> [port=5005] [--rpmsg-name=a72_from_r5f]\n", argv[0]);
+    return 1;
+  }
+
+  const char* host_ip = argv[1];
+  int port = 5005;
+  if (argc >= 3 && strncmp(argv[2], "--", 2) != 0) {
+    port = std::atoi(argv[2]);
+  }
+
+  const char* rpmsg_name = "a72_from_r5f";
+  for (int i = 2; i < argc; ++i) {
+    if (strncmp(argv[i], "--rpmsg-name=", 13) == 0) {
+      rpmsg_name = argv[i] + 13;
+    }
+  }
+
+  // Open UDP socket
+  int sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if (sock < 0) { perror("socket"); return 1; }
+
+  sockaddr_in dst{};
+  dst.sin_family = AF_INET;
+  dst.sin_port   = htons(port);
+
+  if (inet_pton(AF_INET, host_ip, &dst.sin_addr) != 1) {
+    std::fprintf(stderr, "Invalid IP: %s\n", host_ip);
+    return 1;
+  }
+
+  // Open RPMsg endpoint
+  int rpfd = rpmsg_open(rpmsg_name);
+  if (rpfd < 0) {
+    std::fprintf(stderr, "telemetry_bridge: no rpmsg endpoint named '%s'\n", rpmsg_name);
+    return 1;
+  }
+
+  std::printf("telemetry_bridge: RPMsg '%s' → UDP %s:%d\n", rpmsg_name, host_ip, port);
+
+  // Read-forward loop
+  // rpmsg chrdevs deliver whole messages per read() so 1024 is a generous buffer
+  alignas(8) uint8 buf[1024]; // sizeof(DFC_t_TelemetryPacket) is well under this
+  for (;;) {
+    ssize_t n = read(rpfd, buf, sizeof(buf));
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      perror("rpmsg read");
+      break;
+    }
+    if (n == 0) {
+      // Shouldn't happen on rpmsg we treat as transient
+      continue;
     }
 
-    const char* host_ip = argv[1];
-    int port = (argc >= 3 && strncmp(argv[2], "--", 2) != 0) ? atoi(argv[2]) : 5005;
-
-    const char* rpmsgName = "r5f_to_a72";
-    for(int i = 2; i < argc; i++) {
-        if (strncmp(argv[i], "--rpmsg-name=", 12) == 0) {
-            rpmsgName = argv[i] + 12;
-        }
+    // Basic validation
+    if ((size_t)n < sizeof(DFC_t_TelemetryPacket)) {
+      // Here we expect the full DFC_t_TelemetryPacket.
+      continue;
     }
 
-    int memfd = open("/dev/mem", O_RDONLY | O_SYNC);
-    if(memfd < 0) {
-        perror("open /dev/mem");
-        return 1;
+    const auto* pkt = reinterpret_cast<const DFC_t_TelemetryPacket*>(buf);
+    if (pkt->magic != DFC_TELE_MAGIC) {
+      // Ignore unrelated payloads on the same endpoint
+      continue;
+    }
+    size_t send_len = sizeof(DFC_t_TelemetryPacket);
+    if (pkt->size >= sizeof(DFC_t_TelemetryPacket) && pkt->size <= (size_t)n) {
+      send_len = pkt->size;
     }
 
-    long pagesz = sysconf(_SC_PAGESIZE);
-    if(pagesz <= 0) {
-        pagesz = 4096;
+    // UDP fire-and-forget
+    ssize_t s = sendto(sock, buf, send_len, 0, (sockaddr*)&dst, sizeof(dst));
+    if (s < 0) {
+      // perror("sendto");  // only if debug necessary
     }
+  }
 
-    off_t phys = (off_t)telem_addr;
-    off_t page_base = phys & ~(off_t)(pagesz - 1);
-    off_t page_off  = phys - page_base;
-    size_t need     = sizeof(DFC_t_TelemetryPacket);
-    size_t map_len  = ((need + page_off + (size_t)pagesz - 1) / (size_t)pagesz) * (size_t)pagesz;
-
-    void* map_base = mmap(nullptr, map_len, PROT_READ, MAP_SHARED, memfd, page_base);
-    if(map_base == MAP_FAILED) {
-        perror("mmap tele");
-        close(memfd);
-        return 1;
-    }
-    volatile DFC_t_TelemetryPacket* pTelemetryPort = (volatile DFC_t_TelemetryPacket*)((uint8*)map_base + page_off);
-
-    int rpfd = rpmsg_open(rpmsgName);
-    if(rpfd < 0) {
-        fprintf(stderr, "tele_tx: no rpmsg endpoint named '%s'\n", rpmsgName);
-        return 1;
-    }
-
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if(sock < 0) {
-        perror("socket");
-        return 1;
-    }
-
-    sockaddr_in dst{};
-    dst.sin_family = AF_INET;
-    dst.sin_port   = htons(port);
-
-    if(inet_pton(AF_INET, host_ip, &dst.sin_addr) != 1) {
-        fprintf(stderr, "bad ip\n");
-        return 1;
-    }
-    printf("tele_tx: waiting TELEM_READY on '%s' → %s:%d\n", rpmsgName, host_ip, port);
-
-    for (;;) {
-        DFC_t_MsgTelemReady telemetryMessage{};
-        ssize_t result = read(rpfd, &telemetryMessage, sizeof(telemetryMessage));
-        if (result < 0) {
-            if(errno == EINTR) {
-                continue;
-            }
-            if(errno == EAGAIN) {
-                usleep(1000);
-                continue;
-            }
-            perror("rpmsg read");
-            break;
-        }
-
-        if((size_t)result < sizeof(telemetryMessage) || telemetryMessage.type != TELEM_READY) {
-            continue;
-        }
-
-        DFC_t_TelemetryPacket telemetryPacket;
-        for (;;) {
-            uint32 begin = __atomic_load_n(&pTelemetryPort->seqLock, __ATOMIC_ACQUIRE);
-            if(begin & 1u) {
-                continue;
-            }
-
-            memcpy(&telemetryPacket, (const void*)pTelemetryPort, sizeof(telemetryPacket));
-            uint32 end = __atomic_load_n(&pTelemetryPort->seqLock, __ATOMIC_ACQUIRE);
-            if(begin == end) {
-                break;
-            }
-        }
-        // send payload (datas)
-        const uint8* payload = ((const uint8*)&telemetryPacket) + offsetof(DFC_t_TelemetryPacket, timestamp_imu_1);
-        size_t plen = sizeof(DFC_t_TelemetryPacket) - offsetof(DFC_t_TelemetryPacket, timestamp_imu_1);
-        (void)sendto(sock, payload, plen, 0, (sockaddr*)&dst, sizeof(dst));
-    }
-    munmap((void*)map_base, map_len);
-    close(memfd);
-    close(rpfd);
-    close(sock);
-
-    return 0;
+  close(rpfd);
+  close(sock);
+  return 0;
 }

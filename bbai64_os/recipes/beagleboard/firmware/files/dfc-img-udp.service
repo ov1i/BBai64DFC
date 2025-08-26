@@ -1,0 +1,16 @@
+[Unit]
+Description=DFC Image UDP TX
+After=network-online.target dfc-isp.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/dfc-img-udp.conf
+ExecStartPre=/usr/sbin/dfc-wait-net ${DFC_NET_IF} ${DFC_HOST}
+ExecStart=/usr/bin/image_tx ${DFC_HOST} ${DFC_IMG_PORT} --max-fps=${DFC_IMG_MAX_FPS}
+Restart=always
+RestartSec=2
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

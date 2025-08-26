@@ -1,17 +1,14 @@
 #ifndef DFC_RPMSG_HELPER_H
 #define DFC_RPMSG_HELPER_H
 
-#include "data_types.h"
-#include "utils.h"
+extern "C" {
+#include <ti/drv/ipc/ipc.h>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
-
-extern "C" {
-#include <ti/drv/ipc/ipc.h>
-#include <ti/drv/ipc/ipc_rpmsg.h>
-#include <ti/drv/ipc/include/rpmessage.h>
 }
+#include <utils.h>
+#include <data_types.h>
 
 namespace rpmsg {
 

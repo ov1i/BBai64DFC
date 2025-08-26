@@ -47,10 +47,10 @@ int main(void) {
     C_RPMsgHelper link_to_R5F;    // send DFC_t_MsgOpticalFlow to R5F
 
     // A72 -> C66x
-    link_from_A72.open(DFC_t_ProcIDs::A72, "a72_to_c66x", nullptr);
+    link_from_A72.open(DFC_t_ProcIDs::A72, "c66x_from_a72", nullptr);
 
     // C66x -> R5F
-    link_to_R5F.open(IPC_R5FSS0_0, "c66x_to_r5f", "r5f_to_c66x");
+    link_to_R5F.open(DFC_t_ProcIDs::R5F, "c66x_to_r5f", "r5f_from_c66x");
     for(uint8 i = 0; i < 50 && !link_to_R5F.isDstReady(); ++i) {
       link_to_R5F.tryResolve(100);
     }

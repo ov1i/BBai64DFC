@@ -1,542 +1,437 @@
 extern "C" {
-#include <stdio.h>
 #include <FreeRTOS.h>
 #include <task.h>
-#include <ti/osal/TaskP.h>
+#include <queue.h>
+#include <timers.h>
 #include <ti/osal/SemaphoreP.h>
-#include <ti/osal/QueueP.h>
 #include <ti/osal/TimerP.h>
-#include <ti/osal/osal.h>
 #include <ti/drv/uart/UART.h>
 #include <ti/drv/uart/UART_stdio.h>
 #include <ti/board/board.h>
-#include <ti/drv/i2c/i2c.h>
-#include <ti/drv/sciclient/sciclient.h>
-#include <ti/csl/arch/r5/csl_arm_r5_mpu.h>
-// #include "rpmsg_lite.h"
-
 }
+
+#include <type_traits>
+#include <cstring>
+#include <cstdint>
+
 #include "imu/mpu9250.h"
+#include "barometer/bmp280.h"
+#include "ekf/ekf.h"
+#include "controller/PIDController.h"
+#include "controller/rcIA6.h"
+#include "pwm/PWMgen.h"
+#include "comms/RPMsg_helper.h"
 #include "dfc_types.h"
 
 
-static uint8 gTaskStackIMU[IMU_TASKSTACKSIZE]                   __attribute__((aligned(32)));
-// static uint8 gTaskStackEKF[EKF_TASKSTACKSIZE]                   __attribute__((aligned(32)));
-static uint8 gTaskStackInit[INIT_TASKSTACKSIZE]                 __attribute__((aligned(32)));
+#if defined(__GNUC__) || defined(__clang__)
+  #define MEM_BARRIER() __asm__ __volatile__("dmb ish" ::: "memory")
+#else
+  #define MEM_BARRIER() __sync_synchronize()
+#endif
 
-void initTask(void *arg0, void *arg1) {
-    imu::C_IMU* pImuOBJ = (imu::C_IMU*)arg0;
-    SemaphoreP_Handle* pInitSempahHandler = (SemaphoreP_Handle*)arg1;
-    Board_STATUS boardStatus = BOARD_SOK;
+template <typename T>
+struct SeqLatest {
+  static_assert(std::is_trivially_copyable<T>::value, "SeqLatest<T> requires trivially copyable T");
+  alignas(8) volatile uint32 seq{0};
+  alignas(8) T               val{};
+};
 
-    UART_init();
-    UART_stdioInit(0);
-    
-    while(pImuOBJ == NULL) {
-        UART_printf("Imu object corrupted...checkup required!\r\n");
-    }
-    while(!pImuOBJ->init()) {
-        UART_printf("MPU9250 init failed! Retrying in a bit...\r\n");
-        TaskP_sleep(10000);
-    }
-    UART_printf("All init OK, releasing app tasks!\r\n");
-    SemaphoreP_post(*pInitSempahHandler);
-    vTaskDelete(NULL);
+// in order to have 1 writer multiple readers and dump read mid change
+template <typename T>
+inline void seq_write(SeqLatest<T>& s, const T& v){
+  s.seq++;
+  MEM_BARRIER();
+
+#if defined(__GNUC__) || defined(__clang__)
+  __builtin_memcpy((void*)&s.val, &v, sizeof(T));
+#else
+  std::memcpy((void*)&s.val, &v, sizeof(T));
+#endif
+
+  MEM_BARRIER();
+  s.seq++;
 }
 
-void imuReadTask(void *arg0, void *arg1) {
-    DFC_t_IMU_TaskArgs *imu_task_args = (DFC_t_IMU_TaskArgs *)arg0;
-    SemaphoreP_Handle* pInitSempahHandler = (SemaphoreP_Handle*)arg1;
-    DFC_t_MPU9250_Data imuRawData;
-    
-    SemaphoreP_pend(*pInitSempahHandler, SemaphoreP_WAIT_FOREVER);
+// prevents torn reads
+template <typename T>
+inline bool seq_read(const SeqLatest<T>& s, T& out){
+  uint32 a = s.seq; 
+  MEM_BARRIER();
 
-    while (1) {
-        // SemaphoreP_pend(imu_task_args->imu_data_semaph, SemaphoreP_WAIT_FOREVER);
+#if defined(__GNUC__) || defined(__clang__)
+  __builtin_memcpy(&out, (const void*)&s.val, sizeof(T));
+#else
+  std::memcpy(&out, (const void*)&s.val, sizeof(T));
+#endif
 
-        if (imu_task_args->imu->update()) {
-            imu_task_args->imu->getCurrentRawData(&imuRawData);
-            UART_printf("IMU: ax=%.2f ay=%.2f az=%.2f gx=%.2f gy=%.2f gz=%.2f mx=%.2f my=%.2f mz=%.2f T=%.2f\r\n",
-                       imuRawData.ax, imuRawData.ay, imuRawData.az,
-                       imuRawData.gx, imuRawData.gy, imuRawData.gz,
-                       imuRawData.mx, imuRawData.my, imuRawData.mz,
-                       imuRawData.temp);
-            // QueueP_put(imu_task_args->imu_data_queue, (QueueP_Elem *)&imuRawData);
-        } else {
-            UART_printf("IMU read failed\r\n");
-        }
-        TaskP_sleepInMsecs(5);
-    }
+  MEM_BARRIER();
+  uint32 b = s.seq;
+  return (a == b) && !(b & 1u); // dump read if corrupted
 }
 
-// void ekfTask(void *arg0, void *arg1) {
-//     DFC_t_EKF_TaskArgs_t *args = (DFC_t_EKF_TaskArgs_t *)arg0;
-//     SemaphoreP_Handle* pInitSempahHandler = (SemaphoreP_Handle*)arg1;
-//     DFC_t_MPU9250_Data *imuRawData;
+static constexpr uint32 HZ_IMU   = 200;
+static constexpr uint32 HZ_CTRL  = 200;
+static constexpr uint32 HZ_BARO  = 50;
+static constexpr uint32 HZ_TELEM = 50;
 
-//     SemaphoreP_pend(*pInitSempahHandler, SemaphoreP_WAIT_FOREVER);
+static imu::C_IMU            gIMU;
+static baro::C_BMP280        gBARO;
+static ekf::C_EKF            gEKF;
+static ctrl::C_PIDController gCTRL;
+static rc::C_RcIA6           gRC;
 
-//     while (1) {
-//         imuRawData = (DFC_t_MPU9250_Data*)QueueP_get(args->imu_data_queue);
-//         imuRawData->ax = imuRawData->ax;
-//         vTaskDelay(pdMS_TO_TICKS(50)); // 50 ms
+static rpmsg::C_RPMsgHelper  gFromC66x;     // optical flow -> R5F
+static rpmsg::C_RPMsgHelper  gToA72;        // telemetry   -> A72
 
-//         SemaphoreP_post(args->imu_data_semaph);
-//     }
-// }
+// init sync
+static SemaphoreP_Handle gInitDoneSem = nullptr;
 
-int main(void) {
-    OS_init();
+static SeqLatest<DFC_t_RcInputs>            gRcLatest;
+static SeqLatest<DFC_t_MPU9250_Data>        gImuLatest;
+static SeqLatest<DFC_t_EKF_State>           gEkfLatest;
+static SeqLatest<DFC_t_BMP280_Data>         gBaroLatest;
+static SeqLatest<DFC_t_PIDControllerState>  gPidLatest;
+static SeqLatest<float64[3]>                gGyroLatest;
 
-    TaskP_Params imuTaskParams, initTaskParams; //, ekfTaskParams, loggerTaskParams;
-    QueueP_Params queueParams;
-    QueueP_Params_init(&queueParams);
-    QueueP_Handle imu_data_queue = QueueP_create(&queueParams);
-    SemaphoreP_Handle imu_data_semaph = SemaphoreP_create(1, NULL);
-    SemaphoreP_Handle init_semaph = SemaphoreP_create(0, NULL);
-
-    imu::C_IMU imuObj;
-    DFC_t_IMU_TaskArgs imuTaskArgs = { &imuObj, imu_data_queue, imu_data_semaph };
-    // DFC_t_EKF_TaskArgs_t ekfTaskArgs = { imu_data_queue, imu_data_semaph };
-
-    
-    TaskP_Params_init(&imuTaskParams);
-    imuTaskParams.stack      = gTaskStackIMU;
-    imuTaskParams.stacksize  = IMU_TASKSTACKSIZE;
-    imuTaskParams.priority   = 3;
-    imuTaskParams.arg0       = (void *)&imuTaskArgs;
-    imuTaskParams.arg1       = (void *)&init_semaph;
-    imuTaskParams.name       = "IMU_Read";
-    TaskP_create(imuReadTask, &imuTaskParams);
-
-    // TaskP_Params_init(&ekfTaskParams);
-    // ekfTaskParams.stack      = gTaskStackEKF;
-    // ekfTaskParams.stacksize  = EKF_TASKSTACKSIZE;
-    // ekfTaskParams.priority   = 2;
-    // ekfTaskParams.arg0       = (void *)&ekfTaskArgs;
-    // ekfTaskParams.arg1       = (void *)&init_semaph;
-    // ekfTaskParams.name       = "EKF";
-    // TaskP_create(ekfTask, &ekfTaskParams);
-
-    TaskP_Params_init(&initTaskParams);
-    initTaskParams.stack = gTaskStackInit;
-    initTaskParams.stacksize = INIT_TASKSTACKSIZE;
-    initTaskParams.priority = 4;
-    initTaskParams.arg0 = (void *)&imuObj;
-    initTaskParams.arg1 = (void *)&init_semaph;
-    initTaskParams.name = "Init";
-    TaskP_create(initTask, &initTaskParams);
-
-    OS_start();
-
-    while (1) { ; }
-
-    return 0;
+static inline uint64_t now_ns() {
+  return (uint64_t)TimerP_getTimeInUsecs() * 1000ull;
 }
 
+enum class EkfMsgType : uint8 { IMU, BARO, FLOW };
 
+struct EkfMsgIMU  { DFC_t_MPU9250_Data data; };
+struct EkfMsgBARO { DFC_t_BMP280_Data  data; };
+struct EkfMsgFLOW { DFC_t_MsgOpticalFlow data; };
 
-extern "C" {
-#include <stdio.h>
-#include <FreeRTOS.h>
-#include <task.h>
-#include <ti/osal/TaskP.h>
-#include <ti/osal/SemaphoreP.h>
-#include <ti/osal/QueueP.h>
-#include <ti/osal/TimerP.h>
-#include <ti/osal/osal.h>
-#include <ti/drv/uart/UART.h>
-#include <ti/drv/uart/UART_stdio.h>
-#include <ti/board/board.h>
-#include <ti/drv/i2c/i2c.h>
-#include <ti/drv/sciclient/sciclient.h>
-#include <ti/csl/arch/r5/csl_arm_r5_mpu.h>
-}
+struct EkfMsg {
+  EkfMsgType type;
+  union {
+    EkfMsgIMU  imu;
+    EkfMsgBARO baro;
+    EkfMsgFLOW flow;
+  };
+};
 
-#include <cstring>
-#include <cmath>
+// separate queues per producer, EKF task uses a QueueSet to multiplex
+static QueueHandle_t qIMU  = nullptr;
+static QueueHandle_t qBARO = nullptr;
+static QueueHandle_t qFLOW = nullptr;
+static QueueSetHandle_t qSET = nullptr;
 
-// ---- Your modules (adjust paths/names to your tree) -----------------------
-#include "comms/rpmsg_helper.hpp"     // your helper (R5F<->A72, R5F<->C66x)
-#include "imu/mpu9250.h"              // imu::C_IMU
-#include "baro/bmp280.h"              // baro::C_BMP280   (assumed)
-#include "ekf/ekf.h"                  // ekf::C_EKF + DFC_t_* types
-#include "controller/PIDController.h" // ctrl::C_PIDController
-#include "pwm/PWMgen.h"               // motor outputs
-#include "rc/rc_sbus.h"               // rc::C_RC (sbus/ppm) — replace with your driver
-#include "common/types/shared_types.h"// DFC_t_ImageHeader, width/height if needed
-#include "common/dfc_types.h"         // DFC_t_* (IMU/Baro structs, EKF params, PID params, RC, Flow msg)
-
-// --------------------------------------------------------------------------
-//                               RATES & STACKS
-// --------------------------------------------------------------------------
-static constexpr uint32_t RATE_EKF_PRED_HZ   = 200;   // 5 ms (IMU pace)
-static constexpr uint32_t RATE_CTRL_HZ       = 200;   // 5 ms (after IMU)
-static constexpr uint32_t RATE_BARO_HZ       = 50;    // 20 ms
-static constexpr uint32_t RATE_RC_HZ         = 200;   // 5 ms
-static constexpr uint32_t RATE_TELEM_HZ      = 50;    // 20 ms
-static constexpr uint32_t RATE_RPMSG_POLL_HZ = 500;   // for flow/RPMsg poll (if needed)
-
-// Stacks (align to 32)
-#define STK(sz)  __attribute__((aligned(32))) static uint8_t sz
-
-STK(gStackInit[2048]);
-STK(gStackIMU[2048]);
-STK(gStackBaro[1536]);
-STK(gStackFlow[2048]);
-STK(gStackRC[1536]);
-STK(gStackCtrl[2048]);
-STK(gStackTelem[2048]);
-
-// --------------------------------------------------------------------------
-//                         GLOBAL SINGLETONS / CONTEXT
-// --------------------------------------------------------------------------
-static imu::C_IMU              gIMU;
-static baro::C_BMP280          gBARO;          // implement or replace by your BMP task
-static ekf::C_EKF              gEKF;
-static ctrl::C_PIDController   gCTRL;
-static rc::C_RC                gRC;            // replace with your RC driver
-
-// RPMsg
-static rpmsg::C_RPMsgHelper    gRpmg_from_C66x;  // optical flow in
-static rpmsg::C_RPMsgHelper    gRpmg_to_A72;     // telemetry out (A72 forwards via UDP)
-static rpmsg::C_RPMsgHelper    gRpmg_from_A72;   // optional commands in
-
-// Sync
-static SemaphoreP_Handle gInitDoneSem  = nullptr;   // released when init ends
-static SemaphoreP_Handle gImuTickSem   = nullptr;   // "fresh IMU/EKF predict happened"
-
-// Shared “last known” data for control loop
-static DFC_t_RcInputs gRcLatest{};
-static float64        gGyroLatest[3] = {0,0,0};
-
-// --------------------------------------------------------------------------
-//                       PARAMETER FILLERS (EDIT TO TASTE)
-// --------------------------------------------------------------------------
-static void fill_default_ekf_params(DFC_t_EKF_Params& p) {
-  std::memset(&p, 0, sizeof(p));
-  // sensor noises (rough defaults; tune!)
-  p.gyro_noise     = 0.02;     // rad/s / sqrt(Hz)
-  p.acc_noise      = 0.8;      // m/s^2 / sqrt(Hz)
-  p.gyro_bias_rw   = 0.0005;   // rad/s^2 sqrt
-  p.acc_bias_rw    = 0.02;     // m/s^3 sqrt
-  p.baro_std       = 0.5;      // m (alt sigma)
-  p.mag_std        = 0.05;     // normed mag sigma
-  // mag north vector (approx NED in your location). Adjust!
-  p.magN[0] = 0.2; p.magN[1] = 0.0; p.magN[2] = 0.98;
-
-  // optical flow
-  p.flow_vel_std   = 0.3;      // m/s equiv noise near 1m
-  p.focalLengthX   = 320.0;    // IMX219 fx (in pixels) — set from calibration
-  p.focalLengthY   = 320.0;    // IMX219 fy (in pixels) — set from calibration
-}
-
-static void fill_default_ctrl_params(DFC_t_PIDController_Params& c) {
-  std::memset(&c, 0, sizeof(c));
-  c.pwm_min_us = 1000; c.pwm_max_us = 2000;
-
-  // RC shaping
-  c.rc_deadband = 0.05;
-  c.rc_expo     = 0.2;
-  c.rc_max_rate[0] = 3.5; c.rc_max_rate[1] = 3.5; c.rc_max_rate[2] = 3.0; // rad/s
-  c.rc_yaw_rate = 2.5;
-  c.rc_max_tilt = 0.5;  // ~28 deg
-
-  // Position & velocity (POS_HOLD)
-  c.kp_pos_xy = 1.0; c.ki_pos_xy = 0.05; c.vel_i_lim_xy = 1.0;
-  c.kp_vel_xy = 2.0; c.ki_vel_xy = 0.2;  c.acc_i_lim_xy = 2.0;
-  c.max_vel_xy = 2.0; c.max_acc_xy = 4.0;
-
-  c.kp_pos_z  = 1.0; c.ki_pos_z = 0.1; c.vel_i_lim_z = 1.0;
-  c.kp_vel_z  = 2.0; c.ki_vel_z = 0.2; c.acc_i_lim_z = 2.0;
-  c.max_vel_z_up = 1.0; c.max_vel_z_down = 1.0;
-
-  // Attitude outer
-  c.kp_att_roll = 6.0; c.kp_att_pitch = 6.0; c.kp_att_yaw = 3.0;
-
-  // Rate inner
-  c.kp_rate[0]=0.25; c.ki_rate[0]=0.25; c.kd_rate[0]=0.0;
-  c.kp_rate[1]=0.25; c.ki_rate[1]=0.25; c.kd_rate[1]=0.0;
-  c.kp_rate[2]=0.25; c.ki_rate[2]=0.20; c.kd_rate[2]=0.0;
-  c.rate_i_lim[0]=0.4; c.rate_i_lim[1]=0.4; c.rate_i_lim[2]=0.3;
-
-  c.hover_thrust = 0.5;
-  c.min_thrust   = 0.0;
-  c.max_thrust   = 1.0;
-
-  // mixers
-  c.mix_roll = 0.8; c.mix_pitch = 0.8; c.mix_yaw = 0.5;
-}
-
-// --------------------------------------------------------------------------
-//                                 INIT TASK
-// --------------------------------------------------------------------------
-static void initTask(void *arg0, void *arg1) {
-  (void)arg0; (void)arg1;
-  UART_init(); UART_stdioInit(0);
-  UART_printf("\r\n[R5F] Init start...\r\n");
-
-  Board_initCfg boardCfg = BOARD_INIT_MODULE_CLOCK | BOARD_INIT_PINMUX_CONFIG;
-  if (Board_init(boardCfg) != BOARD_SOK) {
-    UART_printf("[R5F] Board_init failed\r\n");
-  }
-
-  // (Optional) pinmux adjustments for I2C pins you showed earlier go here
-
-  // I2C init (for IMU + BARO)
-  I2C_init();
-
-  // IPC/RPMsg init
+// init first at boot
+static void initTask(void*, void*) {
+  UART_init(); 
+  UART_stdioInit(0);
   rpmsg::C_RPMsgHelper::init();
 
-  // Open endpoints:
-  //  - from C66x (flow)
-  gRpmg_from_C66x.open(DFC_t_ProcIDs::C66X, "r5f_from_c66x", "c66x_to_r5f"); // local announce + resolve remote
-  //  - to A72 (telemetry)
-  gRpmg_to_A72.open(DFC_t_ProcIDs::A72, "r5f_to_a72", "a72_from_r5f");
-  //  - from A72 (optional cmds)
-  gRpmg_from_A72.open(DFC_t_ProcIDs::A72, "r5f_from_a72", "a72_to_r5f");
+  UART_printf("[R5F] init…\r\n");
 
-  // IMU bring-up & quick gyro bias calibration
-  while(!gIMU.init()) {
-    UART_printf("[R5F] MPU9250 init failed, retry...\r\n"); vTaskDelay(pdMS_TO_TICKS(200));
+  while(!gIMU.init())  { UART_printf("[R5F] IMU init retry\r\n");  vTaskDelay(pdMS_TO_TICKS(200)); }
+  while(!gBARO.init()) { UART_printf("[R5F] BARO init retry\r\n"); vTaskDelay(pdMS_TO_TICKS(200)); }
+
+  /// TODO: implement simple gyro bias capture calib (~2–3s still on bench)
+
+  gBARO.ground_reset();
+  {
+    const uint32 duration = pdMS_TO_TICKS(1500);
+    const uint32 step = pdMS_TO_TICKS(1000 / HZ_BARO);
+    uint32 ts = xTaskGetTickCount();
+
+    while((xTaskGetTickCount() - ts) < duration) {
+        if(gBARO.update()) {
+            gBARO.ground_collect();
+        }
+        vTaskDelay(step);
+    }
   }
-  UART_printf("[R5F] IMU OK, calibrating gyro... keep still.\r\n");
-  gIMU.calibrateGyroBlocking(2000 /* ms */);
-  UART_printf("[R5F] Gyro calibration done.\r\n");
 
-  // BARO bring-up & ground ref
-  while(!gBARO.init()) {
-    UART_printf("[R5F] BMP280 init failed, retry...\r\n"); vTaskDelay(pdMS_TO_TICKS(200));
+  if(!gBARO.ground_finalize()) {
+    UART_printf("[R5F] BARO ground finalize: not enough samples falling back.\r\n");
+  } else {
+    UART_printf("[R5F] BARO P0 set.\r\n");
   }
-  gBARO.captureGroundReference(1500 /* ms averaging window */);
-  UART_printf("[R5F] Baro ground ref OK.\r\n");
 
-  // EKF reset + params
-  DFC_t_EKF_Params ekfP; fill_default_ekf_params(ekfP);
-  gEKF.setCustomParams(ekfP);
-  gEKF.reset(gIMU.now_ns());
+  // EKF params & reset to current time 
+  DFC_t_EKF_Params ekfParams{};
+  gEKF.setParams(ekfParams);
+  gEKF.reset(now_ns());
 
-  // Controller params + motors safe
-  DFC_t_PIDController_Params cP; fill_default_ctrl_params(cP);
-  gCTRL.init(cP);
+  // PWM + Controller params
+  DFC_t_PWMgen_Params pwmParams{};
+  PWMgen::init(pwmParams);
 
-  // RC input
-  gRC.init(); // pick your port (sbus/ppm) inside
+  DFC_t_PIDController_Params ctrlParams{};
+  gCTRL.init(ctrlParams);
 
-  // Optional: ESC calibration (commented for safety)
-  // gCTRL.calibrateEscBlocking();
+  // RC driver 
+  DFC_t_RcParams rcParams{};
+  gRC.init(rcParams);
+
+  // RPMsg endpoints 
+  gFromC66x.open(DFC_t_ProcIDs::C66, "r5f_from_c66x", nullptr);         // oflow
+  gToA72.open(DFC_t_ProcIDs::A72, "r5f_to_a72", "a72_from_r5f");        // telemetry
+  for(uint8 i = 0; i < 50 && !gToA72.isDstReady(); ++i) {
+    gToA72.tryResolve(100);
+  }
 
   SemaphoreP_post(gInitDoneSem);
-  UART_printf("[R5F] Init done.\r\n");
   vTaskDelete(NULL);
 }
 
-// --------------------------------------------------------------------------
-//                                 IMU TASK
-// --------------------------------------------------------------------------
-static void imuTask(void *arg0, void *arg1) {
-  (void)arg0; (void)arg1;
+// IMU: 200 Hz -> qIMU
+static void imuTask(void*, void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
-
-  TickType_t last = xTaskGetTickCount();
-  const TickType_t period = pdMS_TO_TICKS(1000 / RATE_EKF_PRED_HZ);
+  uint32 last = xTaskGetTickCount();
+  const uint32 per = pdMS_TO_TICKS(1000 / HZ_IMU);
 
   for (;;) {
-    vTaskDelayUntil(&last, period);
+    vTaskDelayUntil(&last, per);
+    if (!gIMU.update()) continue;
 
-    DFC_t_MPU9250_Data s{};
-    if (gIMU.update()) {
-      gIMU.getCurrentRawData(&s);
+    DFC_t_MPU9250_Data data = gIMU.getData();
+    if (data.ts_ns == 0) data.ts_ns = now_ns();
 
-      // EKF predict step happens inside handle_imu()
-      gEKF.handle_imu(s);
+    // publish for telemetry
+    seq_write(gImuLatest, data);
 
-      // keep the latest gyro for the rate controller
-      gGyroLatest[0] = s.gx; gGyroLatest[1] = s.gy; gGyroLatest[2] = s.gz;
+    // publish gyro for controller immediately (no EKF dependency)
+    float64 g3[3] = { data.gx, data.gy, data.gz };
+    seq_write(gGyroLatest, g3);
 
-      // let control loop know a fresh predict is available
-      SemaphoreP_post(gImuTickSem);
-    }
+    EkfMsg m{}; 
+    m.type = EkfMsgType::IMU; 
+    m.imu.data = data;
+
+    (void)xQueueSendToBack(qIMU, &m, 0);    // drop on overflow, EKF is the bottleneck anyway
   }
 }
 
-// --------------------------------------------------------------------------
-//                                 BARO TASK
-// --------------------------------------------------------------------------
-static void baroTask(void *arg0, void *arg1) {
-  (void)arg0; (void)arg1;
+// BARO: 50 Hz -> qBARO
+static void baroTask(void*, void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
-
-  TickType_t last = xTaskGetTickCount();
-  const TickType_t period = pdMS_TO_TICKS(1000 / RATE_BARO_HZ);
+  uint32 last = xTaskGetTickCount();
+  const uint32 step = pdMS_TO_TICKS(1000 / HZ_BARO);
 
   for (;;) {
-    vTaskDelayUntil(&last, period);
+    vTaskDelayUntil(&last, step);
+    if (!gBARO.update()) continue;
 
-    DFC_t_BMP280_Data b{};
-    if (gBARO.read(b)) {
-      // altitude in meters (NED: update_baro expects +down; your BMP code
-      // should already provide relative altitude, positive down)
-      gEKF.handle_baro(b);
-    }
+    DFC_t_BMP280_Data data = gBARO.getData();
+    if (data.ts_ns == 0) data.ts_ns = now_ns();
+
+    seq_write(gBaroLatest, data);
+
+    EkfMsg m{}; 
+    m.type = EkfMsgType::BARO;
+    m.baro.data = data;
+
+    (void)xQueueSendToBack(qBARO, &m, 0);
   }
 }
 
-// --------------------------------------------------------------------------
-//                         OPTICAL FLOW RPMSG (C66x) TASK
-// --------------------------------------------------------------------------
-static void flowTask(void *arg0, void *arg1) {
-  (void)arg0; (void)arg1;
+// Optical flow (blocking recv) -> qFLOW
+static void flowTask(void*, void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
 
-  // Try to resolve remote endpoint for a while (non-fatal if late)
-  for (int i=0;i<40 && !gRpmg_from_C66x.isDstReady(); ++i) {
-    gRpmg_from_C66x.tryResolve();
-    vTaskDelay(pdMS_TO_TICKS(50));
+  for (uint8 i = 0; i < 40 && !gFromC66x.isDstReady(); ++i) {
+    gFromC66x.tryResolve(250);
+    vTaskDelay(pdMS_TO_TICKS(25));
   }
 
-  // Blocking receive loop
   for (;;) {
     DFC_t_MsgOpticalFlow msg{};
-    const int n = gRpmg_from_C66x.recv(&msg, (int)sizeof(msg), -1);
-    if (n == (int)sizeof(msg) && msg.magic == DFC_FLOW_RAW_MAGIC) {
-      gEKF.handle_flow(msg); // does gyro-mean derotation internally, then update
+    sint32 n = gFromC66x.recv(&msg, (sint32)sizeof(msg), -1);   // block until a frame arrives
+    if (n == (sint32)sizeof(msg) && msg.magic == DFC_FLOW_RAW_MAGIC) {
+      EkfMsg m{}; 
+      m.type = EkfMsgType::FLOW; 
+      m.flow.data = msg;
+
+      (void)xQueueSendToBack(qFLOW, &m, 0);
     }
   }
 }
 
-// --------------------------------------------------------------------------
-//                                 RC TASK
-// --------------------------------------------------------------------------
-static void rcTask(void *arg0, void *arg1) {
-  (void)arg0; (void)arg1;
+// RC reader (fast poll, ~250 Hz) -> snapshot only (controller reads it)
+static void rcTask(void*, void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
-
-  TickType_t last = xTaskGetTickCount();
-  const TickType_t period = pdMS_TO_TICKS(1000 / RATE_RC_HZ);
-
   for (;;) {
-    vTaskDelayUntil(&last, period);
-    gRC.read(gRcLatest);  // fill DFC_t_RcInputs (mode, roll/pitch/yaw/thr, arm)
+    gRC.update();
+    seq_write(gRcLatest, gRC.getData());
+
+    vTaskDelay(pdMS_TO_TICKS(4));
   }
 }
 
-// --------------------------------------------------------------------------
-//                              CONTROL (PID) TASK
-// --------------------------------------------------------------------------
-static void ctrlTask(void *arg0, void *arg1) {
-  (void)arg0; (void)arg1;
+// EKF worker (single owner of gEKF)
+// Pulls from a QueueSet so messages are handled in arrival order.
+static void ekfTask(void*, void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
 
-  // Run right after IMU/EKF tick to minimize latency
   for (;;) {
-    // Wait up to one period for a fresh tick; if missed, still run (failsafe)
-    if (SemaphoreP_pend(gImuTickSem, pdMS_TO_TICKS(1000 / RATE_CTRL_HZ)) == SemaphoreP_TIMEOUT) {
-      // no fresh IMU tick; fall back to periodic
-      vTaskDelay(pdMS_TO_TICKS(1000 / RATE_CTRL_HZ));
+    QueueSetMemberHandle_t ready = xQueueSelectFromSet(qSET, portMAX_DELAY);
+    if (!ready) continue;
+
+    EkfMsg m{};
+    if (xQueueReceive(ready, &m, 0) != pdTRUE) continue;
+
+    switch (m.type) {
+      case EkfMsgType::IMU:
+        gEKF.handle_imu(m.imu.data);
+        break;
+      case EkfMsgType::BARO:
+        gEKF.handle_baro(m.baro.data);
+        break;
+      case EkfMsgType::FLOW:
+        gEKF.handle_flow(m.flow.data);
+        break;
     }
 
-    // Use EKF state snapshot
-    const DFC_t_EKF_State st = gEKF.state(); // returns by value (small struct)
-
-    // dt: you can compute from EKF timestamps if you want; we keep constant 5ms
-    constexpr float64 dt = 1.0/ (float64)RATE_CTRL_HZ;
-
-    // Controller update → PWM
-    gCTRL.update(st, gGyroLatest, gRcLatest, dt);
+    // publish fresh EKF state snapshot after each update
+    seq_write(gEkfLatest, gEKF.getState());
   }
 }
 
-// --------------------------------------------------------------------------
-//                              TELEMETRY TASK
-// --------------------------------------------------------------------------
-static void telemTask(void *arg0, void *arg1) {
-  (void)arg0; (void)arg1;
+// controller (triggered by IMU rate)
+static void ctrlTask(void*, void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
-
-  TickType_t last = xTaskGetTickCount();
-  const TickType_t period = pdMS_TO_TICKS(1000 / RATE_TELEM_HZ);
+  uint32 last = xTaskGetTickCount();
+  const uint32 step = pdMS_TO_TICKS(1000 / HZ_CTRL);
 
   for (;;) {
-    vTaskDelayUntil(&last, period);
+    vTaskDelayUntil(&last, step);
 
-    // pack a minimal telemetry (extend as you like)
-    struct __attribute__((packed)) TelemetryMsg {
-      uint32_t magic;
-      uint64_t t_ns;
-      float    p[3], v[3];
-      float    q[4];
-      float    thr;      // last thrust cmd (optional: expose from controller)
-      uint8_t  mode;
-      uint8_t  armed;
-    } m{};
+    DFC_t_EKF_State data {};
+    if (!seq_read(gEkfLatest, data)) continue;     // no EKF state yet
 
-    m.magic = 0x54454C45; // 'TELE'
-    const auto st = gEKF.state();
-    m.t_ns = st.t_ns;
-    m.p[0] = st.p[0]; m.p[1]=st.p[1]; m.p[2]=st.p[2];
-    m.v[0] = st.v[0]; m.v[1]=st.v[1]; m.v[2]=st.v[2];
-    m.q[0] = st.q[0]; m.q[1]=st.q[1]; m.q[2]=st.q[2]; m.q[3]=st.q[3];
-    m.thr  = 0.0f;  // TODO: feed from controller if you keep a getter
-    m.mode = (uint8_t)gRcLatest.mode;
-    m.armed= gRcLatest.arm ? 1 : 0;
+    float64 gyro[3]; 
+    if (!seq_read(gGyroLatest, gyro)) continue;
 
-    (void)gRpmg_to_A72.send(&m, (int)sizeof(m));
+    DFC_t_RcInputs rc; 
+    if (!seq_read(gRcLatest, rc)) rc = {};
+
+    gCTRL.update(data, gyro, rc, 1.0 / HZ_CTRL);
+    seq_write(gPidLatest, gCTRL.getState());
   }
 }
 
-// --------------------------------------------------------------------------
-//                                   MAIN
-// --------------------------------------------------------------------------
+// telemetry: 50 Hz 
+static void telemTask(void*, void*) {
+  SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
+  uint32 last = xTaskGetTickCount();
+  const uint32 step = pdMS_TO_TICKS(1000 / HZ_TELEM);
+  static uint32 s_seq = 0;
+
+  // caches to avoid blank frames on rare seqlock collisions
+  static DFC_t_MPU9250_Data                 imu_cache{};
+  static DFC_t_BMP280_Data                  baro_cache{};
+  static DFC_t_EKF_State                    st_cache{};
+  static DFC_t_RcInputs                     rc_cache{};
+  static DFC_t_PIDControllerState           pid_cache {};
+
+  for (;;) {
+    vTaskDelayUntil(&last, step);
+
+    // Update caches (keep last valid on collision)
+    DFC_t_MPU9250_Data imu_tmp;         if(seq_read(gImuLatest, imu_tmp)) imu_cache = imu_tmp;
+    DFC_t_BMP280_Data baro_tmp;         if(seq_read(gBaroLatest, baro_tmp)) baro_cache = baro_tmp;
+    DFC_t_EKF_State st_tmp;             if(seq_read(gEkfLatest, st_tmp)) st_cache  = st_tmp;
+    DFC_t_RcInputs rc_tmp;              if(seq_read(gRcLatest, rc_tmp)) rc_cache = rc_tmp;
+    DFC_t_PIDControllerState pid_tmp;   if(seq_read(gPidLatest, pid_tmp)) pid_cache = pid_tmp;
+
+    // Build packet
+    DFC_t_TelemetryPacket m{};
+    m.magic = DFC_TELE_MAGIC; 
+    m.size  = (uint16)sizeof(DFC_t_TelemetryPacket);
+    m.seq   = s_seq++;
+
+    // IMU/MAG
+    m.ax = (float32)imu_cache.ax; m.ay =( float32)imu_cache.ay; m.az = (float32)imu_cache.az;
+    m.gx = (float32)imu_cache.gx; m.gy = (float32)imu_cache.gy; m.gz = (float32)imu_cache.gz;
+    m.mx = (float32)imu_cache.mx; m.my = (float32)imu_cache.my; m.mz = (float32)imu_cache.mz;
+
+    m.mag_adjustment[0] = (float32)imu_cache.mag_adjustment[0];
+    m.mag_adjustment[1] = (float32)imu_cache.mag_adjustment[1];
+    m.mag_adjustment[2] = (float32)imu_cache.mag_adjustment[2];
+
+    m.imu_temp = (float32)imu_cache.temp;
+
+    m.mag_rdy = imu_cache.mag_rdy ? 1u : 0u;
+
+    // BARO
+    m.baro_p_hPa  = (float32)baro_cache.pressure;
+    m.baro_alt_m  = (float32)baro_cache.altitude;
+    m.baro_temp_C = (float32)baro_cache.temp;
+
+    // EKF nominal
+    m.pN = (float32)st_cache.p[0]; m.pE = (float32)st_cache.p[1]; m.pD = (float32)st_cache.p[2];
+    m.vN = (float32)st_cache.v[0]; m.vE = (float32)st_cache.v[1]; m.vD = (float32)st_cache.v[2];
+    m.qw = (float32)st_cache.q[0]; m.qx = (float32)st_cache.q[1]; m.qy = (float32)st_cache.q[2]; m.qz = (float32)st_cache.q[3];
+
+    // biases + P diag
+    m.bgx = (float32)st_cache.bg[0]; m.bgy = (float32)st_cache.bg[1]; m.bgz = (float32)st_cache.bg[2];
+    m.bax = (float32)st_cache.ba[0]; m.bay = (float32)st_cache.ba[1]; m.baz = (float32)st_cache.ba[2];
+    for (uint8 i=0;i<15;i++) m.Pdiag[i] = (float32)st_cache.P[i*15 + i];
+
+    // RC
+    m.thr   = (float32)rc_cache.thr; 
+    m.roll  = (float32)rc_cache.roll;
+    m.pitch = (float32)rc_cache.pitch;
+    m.yaw   = (float32)rc_cache.yaw;
+    m.arm = rc_cache.arm ? 1u : 0u;
+    m.mode= (uint8)rc_cache.mode;
+
+    // Optical flow
+    m.of_u          = (float32)st_cache.oflow_u; 
+    m.of_v          = (float32)st_cache.oflow_v; 
+    m.of_quality    = (float32)st_cache.oflow_quality; 
+    m.of_valid      = (float32)st_cache.oflow_valid;
+
+    // Motors + PID setpoints
+    m.m0 = pid_cache.m1;
+    m.m1 = pid_cache.m2; 
+    m.m2 = pid_cache.m3; 
+    m.m3 = pid_cache.m4;
+
+    m.pos_sp_N = (float32)pid_cache.pos_sp_NED[0]; 
+    m.pos_sp_E = (float32)pid_cache.pos_sp_NED[1]; 
+    m.pos_sp_D = (float32)pid_cache.pos_sp_NED[2];
+
+    m.vel_sp_N = (float32)pid_cache.vel_sp_NED[0];
+    m.vel_sp_E = (float32)pid_cache.vel_sp_NED[1];
+    m.vel_sp_D = (float32)pid_cache.vel_sp_NED[2];
+
+    m.yaw_sp        = (float32)pid_cache.yaw_sp;
+    m.pos_sp_valid  = pid_cache.pos_sp_valid ? 1u : 0u;
+
+    // Send to A72 via RPMsg
+    (void)gToA72.send(&m, (int)sizeof(m));
+  }
+}
+
 int main(void) {
-  OS_init();
-
-  // Semaphores
   gInitDoneSem = SemaphoreP_create(0, NULL);
-  gImuTickSem  = SemaphoreP_create(0, NULL);
 
-  // Create tasks (priorities: higher number = higher priority in TI-RTOS/FreeRTOS)
-  TaskP_Params p;
-  TaskP_Params_init(&p);
+  // queues + set (depths tuned to keep latency low)
+  qIMU  = xQueueCreate(16, sizeof(EkfMsg));
+  qBARO = xQueueCreate( 8, sizeof(EkfMsg));
+  qFLOW = xQueueCreate(16, sizeof(EkfMsg));
 
-  // Init (highest)
-  p.stack = gStackInit; p.stacksize = sizeof(gStackInit); p.priority = 6;
-  p.name  = (char*)"Init"; TaskP_create(initTask, &p);
+  qSET = xQueueCreateSet(16 + 8 + 16);
+  xQueueAddToSet(qIMU,  qSET);
+  xQueueAddToSet(qBARO, qSET);
+  xQueueAddToSet(qFLOW, qSET);
 
-  // IMU (200 Hz)
-  TaskP_Params_init(&p);
-  p.stack = gStackIMU; p.stacksize = sizeof(gStackIMU); p.priority = 5;
-  p.name  = (char*)"IMU"; TaskP_create(imuTask, &p);
+  // tasks
+  xTaskCreate(initTask, "init",  3072, NULL, 6, NULL);
+  xTaskCreate(imuTask,  "imu",   2048, NULL, 5, NULL);
+  xTaskCreate(baroTask, "baro",  1536, NULL, 4, NULL);
+  xTaskCreate(flowTask, "flow",  2048, NULL, 4, NULL);
+  xTaskCreate(ekfTask,  "ekf",   3072, NULL, 5, NULL);
+  xTaskCreate(ctrlTask, "ctrl",  2048, NULL, 4, NULL);
+  xTaskCreate(rcTask,   "rc",    1536, NULL, 3, NULL);
+  xTaskCreate(telemTask,"telem", 1536, NULL, 2, NULL);
 
-  // Control (200 Hz) — runs after IMU tick
-  TaskP_Params_init(&p);
-  p.stack = gStackCtrl; p.stacksize = sizeof(gStackCtrl); p.priority = 4;
-  p.name  = (char*)"CTRL"; TaskP_create(ctrlTask, &p);
-
-  // Flow RPMsg (blocking receive)
-  TaskP_Params_init(&p);
-  p.stack = gStackFlow; p.stacksize = sizeof(gStackFlow); p.priority = 3;
-  p.name  = (char*)"FLOW"; TaskP_create(flowTask, &p);
-
-  // Baro (50 Hz)
-  TaskP_Params_init(&p);
-  p.stack = gStackBaro; p.stacksize = sizeof(gStackBaro); p.priority = 3;
-  p.name  = (char*)"BARO"; TaskP_create(baroTask, &p);
-
-  // RC (200 Hz)
-  TaskP_Params_init(&p);
-  p.stack = gStackRC; p.stacksize = sizeof(gStackRC); p.priority = 3;
-  p.name  = (char*)"RC"; TaskP_create(rcTask, &p);
-
-  // Telemetry (50 Hz)
-  TaskP_Params_init(&p);
-  p.stack = gStackTelem; p.stacksize = sizeof(gStackTelem); p.priority = 2;
-  p.name  = (char*)"TELEM"; TaskP_create(telemTask, &p);
-
-  OS_start();
-
-  // should never reach
-  for(;;) { }
-  return 0;
+  vTaskStartScheduler();
+  for(;;){} // should never return
 }

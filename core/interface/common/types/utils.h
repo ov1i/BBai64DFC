@@ -2,13 +2,6 @@
 #define UTILS_H
 #include "data_types.h"
 
-#define EKF_TASKSTACKSIZE                   (4096)
-
-#define IMU_TASKSTACKSIZE                   (2048)
-#define IMU_QUEUE_LENGTH                    (4)
-
-#define INIT_TASKSTACKSIZE                  (2048)
-
 #define PADCONFIG_OFFSET_REG116             (116 * 4) // register number * 4 bytes per register
 #define PADCONFIG_OFFSET_REG119             (119 * 4) // register number * 4 bytes per register
 #define PADCONFIG_OFFSET_REG120             (120 * 4) // register number * 4 bytes per register

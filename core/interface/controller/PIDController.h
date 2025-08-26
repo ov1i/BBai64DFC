@@ -2,12 +2,18 @@
 #define DFC_PID_H
 
 #include "pwm/PWMgen.h"
+
+extern "C" {
+#include <stdint.h>
+#include <stddef.h>
 #include <cstdint>
+#include <cstring>
+}
+
 #include <cmath>
 #include <algorithm>
-#include <cstring>
-#include "dfc_types.h"
-#include "utils.h"
+#include <utils.h>
+#include <dfc_types.h>
 
 namespace ctrl {
 
@@ -18,9 +24,9 @@ public:
   void update(
       const DFC_t_EKF_State& ekfState,      // pose/vel/quat
       const float64 gyroInput[3],       // body rates p,q,r from IMU
-      const DFC_t_RcInputs& rcInput,
-      float64 dt_s);
+      const DFC_t_RcInputs& rcInput, float64 dt_s);
 
+      const DFC_t_PIDControllerState& getState() const { return m_State; }
 private:
   DFC_t_PIDController_Params m_Params;
   DFC_t_PIDControllerState m_State;
@@ -54,3 +60,5 @@ private:
 };
 
 } // namespace ctrl
+
+#endif

@@ -331,7 +331,10 @@ void C_EKF::update_mag_body(const float64 b_meas[3]) {
 }
 
 void C_EKF::update_flow_pxrate_derot(const float64 px_rate[2], float64 height_m, float64 quality) {
-  if (quality < 0.005 || height_m < 0.05) return;
+  if (quality < 0.005 || height_m < 0.05) { 
+    m_state.oflow_valid = 0; 
+    return;
+  }
 
   float64 vbx = -height_m * (px_rate[0] / m_params.focalLengthX);
   float64 vby = -height_m * (px_rate[1] / m_params.focalLengthY);
@@ -479,12 +482,24 @@ void C_EKF::handle_baro(const DFC_t_BMP280_Data& input) {
 }
 
 void C_EKF::handle_flow(const DFC_t_MsgOpticalFlow& msg) {
+  m_state.oflow_valid = 1;
   if(!(msg.magic == DFC_FLOW_RAW_MAGIC)) { // Classic sanity check
+      m_state.oflow_valid = 0;
+      m_state.oflow_u = 0;
+      m_state.oflow_v = 0;
       return;
   }
 
-  if(msg.quality < 0.005 || msg.ts_curr_ns == 0) return;
-  if(m_last_flow_ts_ns != 0 && msg.ts_curr_ns <= m_last_flow_ts_ns) return; // no good data order corrupted
+  m_state.oflow_quality = msg.quality;
+
+  if((msg.quality < 0.005 || msg.ts_curr_ns == 0) || 
+    (m_last_flow_ts_ns != 0 && msg.ts_curr_ns <= m_last_flow_ts_ns))   // no good data order corrupted
+  {
+    m_state.oflow_valid = 0;
+    m_state.oflow_u = msg.u_px_per_s / m_params.focalLengthX; // rad/s
+    m_state.oflow_v = msg.v_px_per_s / m_params.focalLengthY; // rad/s
+    return;
+  }
 
   // camera axes aligned with body (no extrinsics)
   float64 avg[3] = {0,0,0};
@@ -501,10 +516,16 @@ void C_EKF::handle_flow(const DFC_t_MsgOpticalFlow& msg) {
   const float64 u_correction = (float64)msg.u_px_per_s - m_params.focalLengthX * avg[1];
   const float64 v_correction = (float64)msg.v_px_per_s + m_params.focalLengthY * avg[0];
 
+  m_state.oflow_u = u_correction / m_params.focalLengthX; // rad/s
+  m_state.oflow_v = v_correction / m_params.focalLengthY; // rad/s
+
   // Scale by estimated altitude (down = +Z)
   float64 height_m = -m_state.p[2];
-  if(height_m < 0.05) return;
-
+  if(height_m < 0.05) {
+    m_state.oflow_valid = 0;
+    return;
+  }
+  
   const float64 px_rate[2] = { u_correction, v_correction };
   update_flow_pxrate_derot(px_rate, height_m, (float64)msg.quality);
 

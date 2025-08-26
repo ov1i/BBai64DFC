@@ -1,12 +1,15 @@
 #ifndef DFC_EKF_H
 #define DFC_EKF_H
 
+extern "C" {
 #include <cstdint>
 #include <cstring>
+}
+
 #include <cmath>
-#include "dfc_types.h"
-#include "shared_types.h"
-#include "utils.h"
+#include <dfc_types.h>
+#include <shared_types.h>
+#include <utils.h>
 
 namespace ekf {
 
@@ -16,7 +19,7 @@ public:
 
   void reset(uint64 t0_ns);
   void setParams(const DFC_t_EKF_Params &p) { m_params = p; }
-  const DFC_t_EKF_State& state() const { return m_state; }
+  const DFC_t_EKF_State& getState() const { return m_state; }
 
   // Low-level
   void predict(const float64 gyro_rad_s[3], const float64 acc_m_s2[3], float64 dt_s);
@@ -51,7 +54,7 @@ private:
   // Helpers for accumulation gyro data over the frame duration and mapping low quality to big scale factor for low K gain (for derot)
   bool gyro_mean(uint64 t0, uint64 t1, float64 output[3]) const;
   void ring_push(uint64 ts, const float64 ringContainer[3]);
-  static inline float64 getQualityScaleFactor(float64 quality)
+  static inline float64 getQualityScaleFactor(float64 quality);
   
   // Math helpers
   static inline void q_norm(float64 q[4]);

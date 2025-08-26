@@ -164,8 +164,8 @@ buildCustomSW() {
     # bitbake -ccleansstate firmwares
     # bitbake -ccleansstate env-init
     # bitbake linux-bb.org
-    bitbake firmware-image
-    # bitbake firmwares
+    # bitbake firmware-image
+    bitbake firmwares
 
     if [ $? -ne 0 ]; then
         echo "Failed to build the project."
