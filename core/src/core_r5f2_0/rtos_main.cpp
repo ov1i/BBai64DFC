@@ -306,7 +306,7 @@ static void initTask() {
     vTaskDelay(pdMS_TO_TICKS(200));       
   }
 
-  while(gToA72.open(A72_procID, "r5f_to_a72", "a72_from_r5f")) {
+  while(!gToA72.open(A72_procID, "r5f_to_a72", "a72_from_r5f")) {
     UART_printf("[R5F] RPMsg pipe between R5F and A72 retry\r\n");
     DebugP_log0("[R5F] RPMsg pipe between R5F and A72 retry\r\n");
     vTaskDelay(pdMS_TO_TICKS(200));       
