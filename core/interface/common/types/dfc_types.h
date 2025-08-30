@@ -4,9 +4,16 @@
 #include "data_types.h"
 
 #ifdef __cplusplus
-namespace imu {
-class C_IMU;
-}
+
+struct DFC_t_MPU9250_Params{
+  // ACC ellipsoid computed params
+  float64 acc_M[9] = { 0, 0, 0,  0, 0, 0,   0, 0, 0 };
+  float64 acc_b[3] = { 0, 0, 0 };
+
+  // MAG ellipsoid computed params
+  float64 mag_M[9] = { 0, 0, 0,  0, 0, 0,   0, 0, 0 };
+  float64 mag_b[3] = { 0, 0, 0 };
+} ;
 
 typedef struct {
   float64 ax, ay, az;        // Accelerometer
@@ -55,8 +62,7 @@ struct DFC_t_EKF_Params{
 
   float64 focalLengthX = 532;
   float64 focalLengthY = 660;
-  // Earth magnetic field in NED (normalized or in uT) – set after a quick
-  // on-ground calibration
+  // Earth magnetic field in NED (normalized or in uT) – set after a quick on-ground calibration
   float32 magN[3] = {0.25f, 0.02f, 0.43f}; // direction, magnitude not critical if std is large
 };
 
@@ -198,7 +204,7 @@ struct DFC_t_PIDControllerState {
 };
 
 struct DFC_t_PWMgen_Params {
-  float64 ehrpwm_clk_hz  = 100e6;
+  float64 clk_hz  = 100e6;
 
   // Output PWM frame rate (ESCs are on 50 Hz for 1–2 ms pulses)
   uint32 freq_hz = 50;

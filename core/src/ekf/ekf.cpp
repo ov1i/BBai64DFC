@@ -2,19 +2,19 @@
 
 namespace ekf {
 
-inline void C_EKF::q_norm(float64 q[4]) {
+void C_EKF::q_norm(float64 q[4]) {
   float64 n = std::sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]);
   if (n > 1e-12) { q[0]/=n; q[1]/=n; q[2]/=n; q[3]/=n; }
 }
 
-inline void C_EKF::q_mul(const float64 a[4], const float64 b[4], float64 o[4]) {
+void C_EKF::q_mul(const float64 a[4], const float64 b[4], float64 o[4]) {
   o[0] = a[0]*b[0] - a[1]*b[1] - a[2]*b[2] - a[3]*b[3];
   o[1] = a[0]*b[1] + a[1]*b[0] + a[2]*b[3] - a[3]*b[2];
   o[2] = a[0]*b[2] - a[1]*b[3] + a[2]*b[0] + a[3]*b[1];
   o[3] = a[0]*b[3] + a[1]*b[2] - a[2]*b[1] + a[3]*b[0];
 }
 
-inline void C_EKF::q_from_dtheta(const float64 dth[3], float64 q[4]) {
+void C_EKF::q_from_dtheta(const float64 dth[3], float64 q[4]) {
   float64 a = std::sqrt(dth[0]*dth[0] + dth[1]*dth[1] + dth[2]*dth[2]);
   float64 ha = 0.5 * a;
   float64 s = (a < 1e-12) ? 0.5 : std::sin(ha) / a;
@@ -22,6 +22,50 @@ inline void C_EKF::q_from_dtheta(const float64 dth[3], float64 q[4]) {
   q[1] = s * dth[0];
   q[2] = s * dth[1];
   q[3] = s * dth[2];
+}
+
+void C_EKF::euler_from_accel(float64 ax, float64 ay, float64 az, float64& roll, float64& pitch) {
+  roll  = atan2(ay, az);
+  pitch = atan2(-ax, sqrt(ay*ay + az*az));
+}
+
+bool C_EKF::yaw_from_accel_mag(float64 ax, float64 ay, float64 az, float64 mx, float64 my, float64 mz, float64 decl, float64& yaw_out) {
+  float64 roll, pitch; 
+
+  euler_from_accel(ax, ay, az, roll, pitch);
+
+  float64 cr = cos(roll), sr = sin(roll), cp = cos(pitch), sp = sin(pitch);
+  float64 mxh = mx*cp + mz*sp;
+  float64 myh = mx*sr*sp + my*cr - mz*sr*cp;
+
+  if (fabs(mxh)<1e-9 && fabs(myh)<1e-9) return false;
+  float64 yaw = atan2(-myh, mxh) + decl;
+
+  if (yaw >  M_PI) yaw -= 2 * M_PI;
+  if (yaw < -M_PI) yaw += 2 * M_PI;
+
+  yaw_out = yaw; 
+  
+  return true;
+}
+
+void C_EKF::quat_from_euler_ZYX(float64 yaw, float64 pitch, float64 roll, float64 q[4]) {
+  float64 cy = cos(0.5*yaw), sy = sin(0.5*yaw);
+  float64 cp = cos(0.5*pitch), sp = sin(0.5*pitch);
+  float64 cr = cos(0.5*roll), sr = sin(0.5*roll);
+
+  q[0] = cy*cp*cr + sy*sp*sr;
+  q[1] = cy*cp*sr - sy*sp*cr;
+  q[2] = cy*sp*cr + sy*cp*sr;
+  q[3] = sy*cp*cr - cy*sp*sr;
+
+  float64 norm = sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
+  if (norm > 1e-12){ 
+    q[0] /= norm; 
+    q[1] /= norm; 
+    q[2] /= norm; 
+    q[3] /= norm; 
+  }
 }
 
 void C_EKF::R_from_q(const float64 q[4], float64 R[9]) {
@@ -58,11 +102,11 @@ void C_EKF::reset(uint64 ts_prev_ns) {
   m_last_baro_ts_ns = 0;
 }
 
-inline void C_EKF::mat15_add_Q(float64* P, const float64* Q) {
+void C_EKF::mat15_add_Q(float64* P, const float64* Q) {
   for (uint8 i=0;i<15;i++) P[i*15 + i] += Q[i];
 }
 
-inline void C_EKF::mat15_FP_PFT(float64* P, const float64* F, float64 dt) {
+void C_EKF::mat15_FP_PFT(float64* P, const float64* F, float64 dt) {
   float64 FP[15*15];
   for (uint8 i=0;i<15;i++){
     for (uint8 j=0;j<15;j++){
@@ -78,7 +122,7 @@ inline void C_EKF::mat15_FP_PFT(float64* P, const float64* F, float64 dt) {
   }
 }
 
-inline void C_EKF::matMN_vec(const float64* M, const float64* v, float64* out, uint8 rows, uint8 cols) {
+void C_EKF::matMN_vec(const float64* M, const float64* v, float64* out, uint8 rows, uint8 cols) {
   for (uint8 i=0;i<rows;i++){
     float64 s=0.0;
     for (uint8 j=0;j<cols;j++) s += M[i*cols + j]*v[j];
@@ -86,7 +130,7 @@ inline void C_EKF::matMN_vec(const float64* M, const float64* v, float64* out, u
   }
 }
 
-inline void C_EKF::axpy(float64* x, const float64* a, float64 k, uint8 n) {
+void C_EKF::axpy(float64* x, const float64* a, float64 k, uint8 n) {
   for (uint8 i=0;i<n;i++) x[i] += k*a[i];
 }
 
@@ -423,7 +467,7 @@ void C_EKF::ring_push(uint64 ts, const float64 ringContainer[3]) {
   m_gyroRing[m_ringHead].w[2] = ringContainer[2];
 }
 
-static inline float64 getQualityScaleFactor(float64 quality) {
+float64 C_EKF::getQualityScaleFactor(float64 quality) {
   if (quality <= 0.05) return 100.0; // Smallest Kalman gain possible
   if (quality <= 0.20) return 25.0;
   if (quality <= 0.40) return 9.0;
@@ -477,7 +521,7 @@ void C_EKF::handle_baro(const DFC_t_BMP280_Data& input) {
   if(input.ts_ns == 0 || input.altitude == 0.0 || input.ts_ns == m_last_baro_ts_ns) return;
 
   // Convert to NED z (down +), is relative to home (GND)
-  update_baro(input.altitude);
+  update_baro(-input.altitude);
   m_last_baro_ts_ns = input.ts_ns;
 }
 
@@ -530,6 +574,53 @@ void C_EKF::handle_flow(const DFC_t_MsgOpticalFlow& msg) {
   update_flow_pxrate_derot(px_rate, height_m, (float64)msg.quality);
 
   m_last_flow_ts_ns = msg.ts_curr_ns;
+}
+
+bool C_EKF::graceful_state_init(float64 ax, float64 ay, float64 az,
+                              float64 mx, float64 my, float64 mz, bool magRdy,
+                              const float64 bg[3], float64 decl_rad,
+                              uint64 t_ns)
+{
+  // roll/pitch from accel
+  float64 roll0 = 0, pitch0 = 0, yaw0 = 0; 
+  euler_from_accel(ax, ay, az, roll0, pitch0);
+
+  // yaw from mag if available
+  bool yawOk = false;
+  if(magRdy) yawOk = yaw_from_accel_mag(ax, ay, az, mx, my, mz, decl_rad, yaw0);
+
+  float64 q0[4]; 
+  quat_from_euler_ZYX(yaw0, pitch0, roll0, q0);
+
+  DFC_t_EKF_State st{};
+  st.t_ns = (t_ns ? t_ns : 0);
+  st.p[0] = 0; st.p[1] = 0; st.p[2] = 0;
+  st.v[0] = 0; st.v[1] = 0; st.v[2] = 0;
+  st.q[0] = q0[0]; st.q[1] = q0[1]; st.q[2] = q0[2]; st.q[3] = q0[3];
+
+  st.bg[0] = bg ? bg[0] : 0; 
+  st.bg[1] = bg ? bg[1] : 0; 
+  st.bg[2] = bg ? bg[2] : 0;
+
+  st.ba[0] = 0; st.ba[1] = 0; st.ba[2] = 0;
+
+  // Covariance (diag) – roll/pitch tight, yaw looser if no mag
+  for(uint8 i=0;i<15*15;i++) st.P[i]=0.0;
+
+  auto setD=[&](uint8 i,float64 val){ st.P[i*15+i] = (float64)val; };
+
+  setD(0,1.0);  setD(1,1.0);    setD(2,1.0);    // pos
+  setD(3,0.4);  setD(4,0.4);    setD(5,0.4);    // vel
+  setD(6,0.03); setD(7,0.03);                   // roll/pitch
+  setD(8, yawOk ? 0.08 : 0.5);                  // yaw
+  setD(9,1e-3);  setD(10,1e-3); setD(11,1e-3);  // gyro bias
+  setD(12,5e-3); setD(13,5e-3); setD(14,5e-3);  // accel bias
+
+  // Load + reset timebase
+  setInitState(st);
+  reset(t_ns ? t_ns : 0);
+
+  return true;
 }
 
 } // namespace ekf

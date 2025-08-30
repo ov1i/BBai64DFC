@@ -9,8 +9,8 @@
 #define VISU_TELE_REGION_PA        0xAB000000U
 #define VISU_TELE_SIZE             0x00800000U  /* 8 MiB */
 
-#define VIRTIO_ID_RPMSG   7U
-#define RPMSG_F_NS        (1U << 0)  /* name service feature */
+#define VIRTIO_ID_RPMSG            7U
+#define RPMSG_F_NS                 (1U << 0)  /* name service feature */
 
 struct resource_table_base {
     uint32 ver;
@@ -30,26 +30,36 @@ enum fw_resource_type {
 
 struct fw_rsc_carveout {
     uint32 type;     /* RSC_CARVEOUT */
-    uint32 da;       /* device address */
-    uint32 pa;       /* physical address */
+    uint32 da;       /* device address (IPA) */
+    uint32 pa;       /* physical address (optional, 0 = let host place) */
     uint32 len;      /* size in bytes */
     uint32 flags;    
     uint32 reserved; 
-    uint8  name[32]; /* needs to be NULL-terminated */
+    uint8  name[32]; /* NULL-terminated */
 };
 
+struct fw_rsc_trace {
+    uint32 type;     /* RSC_TRACE */
+    uint32 da;       /* device address (0 = let host place) */
+    uint32 len;      /* buffer size in bytes */
+    uint32 reserved;
+    uint8  name[32]; /* label shown by Linux, NULL-terminated */
+};
+
+// rpmsg
 struct fw_rsc_vdev {
     uint32 type;           /* RSC_VDEV */
     uint32 id;             /* VIRTIO_ID_RPMSG */
     uint32 notifyid;       /* filled/used by host */
     uint32 dfeatures;      /* device features */
-    uint32 gfeatures;      /* host-ack’d features (filled by host) */
+    uint32 gfeatures;      /* host-acked features (filled by host) */
     uint32 config_len;     /* cfg size (0 for rpmsg) */
     uint8  status;         /* set by host */
     uint8  num_of_vrings;  /* 2 */
     uint8  reserved[2];
 };
 
+// vring
 struct fw_rsc_vdev_vring {
     uint32 da;       /* device address */
     uint32 align;    /* vring alignment  */
@@ -57,4 +67,4 @@ struct fw_rsc_vdev_vring {
     uint32 notifyid; /* used by host */
 };
 
-#endif
+#endif /* RSC_TABLE_TYPES_H */

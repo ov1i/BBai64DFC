@@ -1,13 +1,14 @@
 [Unit]
-Description=Flash eMMC on First Boot
-ConditionPathExists=!/var/lib/flashed.flag
-After=network.target
+Description=Clone current SD system to eMMC
+After=multi-user.target
+Wants=multi-user.target
+ConditionPathExists=!/etc/EMMC_CLONED_FROM_SD  # prevent re-run on cloned systems
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/flash-to-emmc.sh
-ExecStartPost=/bin/touch /etc/emmc_flashed
-RemainAfterExit=true
+ExecStart=/usr/sbin/flash-to-emmc
+RemainAfterExit=no
+TimeoutStartSec=0
 
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,87 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+#include "k3-pinctrl.h"
+
+&{/chosen} {
+	overlays {
+		BBAI64-CSI1-imx219.kernel = __TIMESTAMP__;
+	};
+};
+
+/ {
+	fragment@101 {
+		target-path = "/";
+
+		__overlay__ {
+			clk_csi1_imx219_fixed: csi1-imx219-xclk {
+				compatible = "fixed-clock";
+				#clock-cells = <0>;
+				clock-frequency = <24000000>;
+			};
+		};
+	};
+};
+
+/* The reset pin (W24) set as an output. */
+&csi1_gpio_pins_default {
+	pinctrl-single,pins = <
+		J721E_IOPAD(0x1b0, PIN_OUTPUT, 7) /* basically enable reset as output */
+	>;
+};
+
+/* Enable the CSI block + DPHY and expose port0 */
+&dphy0 { status = "okay"; };
+
+&ti_csi2rx0 { status = "okay"; };
+
+&cdns_csi2rx0 {	status = "okay"; };
+
+&main_i2c1 {
+	status = "okay";
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&main_i2c1_pins_default>;
+
+	clock-frequency = <400000>;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	csi1_imx219: csi1_sensor@10 {
+		status = "okay";
+		compatible = "sony,imx219";
+		reg = <0x10>;
+
+		clocks = <&clk_csi1_imx219_fixed>;
+		clock-names = "xclk";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&csi1_gpio_pins_default>;
+
+		reset-gpios = <&main_gpio0 107 GPIO_ACTIVE_HIGH>;
+
+		port {
+			csi2rx1_cam0: endpoint {
+				remote-endpoint = <&csi2rx1_in_sensor>;
+				link-frequencies = /bits/ 64 <456000000>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+&csi1_port0 {
+	status = "okay";
+
+	csi2rx1_in_sensor: endpoint {
+		remote-endpoint = <&csi2rx1_cam0>;
+		bus-type = <4>; /* CSI2 DPHY. */
+		clock-lanes = <0>;
+		data-lanes = <1 2>;
+	};
+};

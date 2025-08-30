@@ -1,13 +1,13 @@
 [Unit]
-Description=DFC Telemetry UDP TX
+Description=DFC IMU Calibration UDP TX
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=-/etc/default/dfc-tele-udp.conf
+EnvironmentFile=-/etc/default/dfc-calib-udp.conf
 ExecStartPre=/usr/sbin/dfc-wait-net ${DFC_NET_IF} ${DFC_HOST}
-ExecStart=/usr/bin/telemetry_tx ${DFC_HOST} ${DFC_TELEM_PORT} --rpmsg-name=${DFC_TELEM_RPMSG_NAME}
+ExecStart=/usr/bin/calibration_tx ${DFC_HOST} ${DFC_CALIB_PORT} --rpmsg-name=${DFC_CALIB_RPMSG_NAME}
 Restart=always
 RestartSec=2
 TimeoutStartSec=0

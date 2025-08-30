@@ -1,6 +1,7 @@
 #include "opticalflow/oflow_c66x.h"
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 
 #if defined(__TI_COMPILER_VERSION__) || defined(_TMS320C6600)
   #include <c6x.h>
@@ -9,37 +10,40 @@
 
 
 // INDOORS HELPER
-static inline float64 quickselect(float64* a, sint32 n, sint32 k) {
-  sint32 l=0, r=n-1;
-  while(1) {
-    float64 p=a[(l+r)/2]; 
-    sint32 i=l,j=r;
-    while(i<=j) { 
-        while(a[i]<p) ++i; 
-        while(a[j]>p) --j; 
-        if(i<=j) {
-            float64 t=a[i];
-            a[i]=a[j];
-            a[j]=t;
-            ++i; --j;
-        }
-    }
-    if(k<=j) r=j; 
-    else if(k>=i) l=i; 
-    else return a[k];
-  }
-}
+// LEGACY
+// static inline float64 quickselect(float64* a, sint32 n, sint32 k) {
+//   sint32 l=0, r=n-1;
+//   while(1) {
+//     float64 p=a[(l+r)/2]; 
+//     sint32 i=l,j=r;
+//     while(i<=j) { 
+//         while(a[i]<p) ++i; 
+//         while(a[j]>p) --j; 
+//         if(i<=j) {
+//             float64 t=a[i];
+//             a[i]=a[j];
+//             a[j]=t;
+//             ++i; --j;
+//         }
+//     }
+//     if(k<=j) r=j; 
+//     else if(k>=i) l=i; 
+//     else return a[k];
+//   }
+// }
 
-static inline void swp(float64& a, float64& b) { float64 t=a; a=b; b=t; }
+static inline void swp(float64* a, float64* b) { float64 *t = a; *a = *b; *b = *t; }
 
-static inline int median_index(float64* a, int i, int j, int k) {
+static inline sint32 median_index(float64* a, sint32 i, sint32 j, sint32 k) {
   const float64 x=a[i], y=a[j], z=a[k];
   return (x<y) ? ((y<z)? j : (x<z? k : i)) : ((x<z)? i : (y<z? k : j));
 }
 
-static inline void insertion_sort(float64* a, int lo, int hi) {
-  for(int i=lo+1;i<=hi;++i) {
-    float64 v=a[i]; int j=i-1;
+static inline void insertion_sort(float64* a, sint32 lo, sint32 hi) {
+  sint32 i;
+  for(i=lo+1;i<=hi;++i) {
+    float64 v=a[i]; 
+    sint32 j=i-1;
     while(j>=lo && a[j]>v) { 
       a[j+1]=a[j]; 
       --j; 
@@ -62,9 +66,9 @@ static inline float64 quickselect_imprv(float64* a, sint32 n, sint32 k) {
     sint32 i1 = lo, i2 = m, i3 = hi;
     if(hi - lo > 64) {
       sint32 s = (hi - lo) / 8;
-      i1 = median_index(a, lo,      lo + s,      lo + 2*s);
-      i2 = median_index(a, m  - s,  m,           m + s);
-      i3 = median_index(a, hi - 2*s,hi - s,      hi);
+      i1 = median_index(a, lo, lo + s, lo + 2*s);
+      i2 = median_index(a, m  - s,  m, m + s);
+      i3 = median_index(a, hi - 2*s,hi - s, hi);
     }
     sint32 pidx = median_index(a, i1, i2, i3);
     float64 pivot = a[pidx];
@@ -72,9 +76,16 @@ static inline float64 quickselect_imprv(float64* a, sint32 n, sint32 k) {
     // 3-way partition -> "< pivot | == pivot | > pivot"
     sint32 lt = lo, i = lo, gt = hi;
     while(i <= gt) {
-      if(a[i] < pivot)      { swp(a[lt], a[i]); ++lt; ++i; }
-      else if (a[i] > pivot) { swp(a[i], a[gt]); --gt; }
-      else                   { ++i; }
+      if(a[i] < pivot) {  
+        swp(&a[lt], &a[i]);
+        ++lt; 
+        ++i; 
+      } else if (a[i] > pivot) { 
+        swp(&a[i], &a[gt]); 
+        --gt;
+      } else { 
+        ++i; 
+      }
     }
 
     // Decide which side contains the k-th (relative to lo)
@@ -88,38 +99,70 @@ static inline float64 quickselect_imprv(float64* a, sint32 n, sint32 k) {
     }
   }
 }
+
+static void bucket_median_uv(const float64* u_buf, const float64* v_buf,
+                             const sint16* cell_x, const sint16* cell_y,
+                             sint32 n,
+                             sint32 midx, sint32 midy,
+                             sint32 left, sint32 up,
+                             float64* u_med, float64* v_med,
+                             float64* tmp) {
+    /* U bucket */
+    sint32 m = 0;
+    sint32 i;
+    for (i = 0; i < n; ++i) {
+        if (((cell_x[i] < midx) == left) && ((cell_y[i] < midy) == up)) {
+            tmp[m++] = u_buf[i];
+        }
+    }
+    *u_med = (m > 0) ? quickselect_imprv(tmp, m, m / 2) : 0.0;
+
+    /* V bucket */
+    m = 0;
+    for (i = 0; i < n; ++i) {
+        if (((cell_x[i] < midx) == left) && ((cell_y[i] < midy) == up)) {
+            tmp[m++] = v_buf[i];
+        }
+    }
+    *v_med = (m > 0) ? quickselect_imprv(tmp, m, m / 2) : 0.0;
+}
 // !INDOORS HELEPR
 
-DFC_t_OFlow_Output of_compute_global_flow(const uint8* prevY, const uint8* currY, sint32 W, sint32 H, sint32 stride, float64 dt_s, const DFC_t_OFlow_Params& params) {
-  DFC_t_OFlow_Output out{0,0,0,false};
-  
+DFC_t_OFlow_Output get_global_flow(const uint8* prevY, const uint8* currY, sint32 W, sint32 H, sint32 stride, float64 dt_s, const DFC_t_OFlow_Params* params) {
+  DFC_t_OFlow_Output out;
+  out.u_px_per_s = 0.0;
+  out.v_px_per_s = 0.0;
+  out.quality = 0.0;
+  out.valid = 0;
+
   // guards
   if(!prevY || !currY || W <= 0 || H <= 0 || stride < W) return out;
-  if(params.cell_w < 3 || params.cell_h < 3) return out;
+  if(params->cell_w < 3 || params->cell_h < 3) return out;
   if(dt_s <= 0.0) return out;
   
-  const sint32 nx = W / params.cell_w;
-  const sint32 ny = H / params.cell_h;
+  const sint32 nx = W / params->cell_w;
+  const sint32 ny = H / params->cell_h;
 
   if (nx < 3 || ny < 3) return out; // we skip 1-cell border
 
   float64 u_buf[1024], v_buf[1024];
-  sint16  sanityBuffer_x[1024], sanityBuffer_y[1024];  // store cell indices for sanity checks
+  sint16 sanityBuffer_x[1024], sanityBuffer_y[1024];  // store cell indices for sanity checks
   sint32 n = 0;
 
   // Process cells (skip 1-cell border)
-  for(sint32 gy=1; gy<ny-1; ++gy) {
-    const sint32 y0 = gy*params.cell_h;
-    const sint32 y1 = y0 + params.cell_h;
+  sint32 gy, gx, y;
+  for(gy=1; gy<ny-1; ++gy) {
+    const sint32 y0 = gy*params->cell_h;
+    const sint32 y1 = y0 + params->cell_h;
 
-    for(sint32 gx=1; gx<nx-1; ++gx) {
-      const sint32 x0 = gx*params.cell_w;
-      const sint32 x1 = x0 + params.cell_w;
+    for(gx=1; gx<nx-1; ++gx) {
+      const sint32 x0 = gx*params->cell_w;
+      const sint32 x1 = x0 + params->cell_w;
 
       float64 Gxx=0.0, Gxy=0.0, Gyy=0.0, Gxt=0.0, Gyt=0.0;
 
       // central differences (Ix = R-L, Iy = D-U, It = curr-prev)
-      for(sint32 y=y0+1; y<y1-1; ++y) {
+      for(y=y0+1; y<y1-1; ++y) {
         const uint8* Pu = prevY + (y-1)*stride + x0;
         const uint8* Pm = prevY + (y  )*stride + x0;
         const uint8* Pd = prevY + (y+1)*stride + x0;
@@ -171,7 +214,7 @@ DFC_t_OFlow_Output of_compute_global_flow(const uint8* prevY, const uint8* currY
       }
 
       const float64 det = Gxx*Gyy - Gxy*Gxy;
-      if(det > (float64)params.texture_det) {
+      if(det > (float64)params->texture_det) {
         const float64 inv00 =  Gyy / det;
         const float64 inv01 = -Gxy / det;
         const float64 inv11 =  Gxx / det;
@@ -191,7 +234,7 @@ DFC_t_OFlow_Output of_compute_global_flow(const uint8* prevY, const uint8* currY
     if(n >= (sint32)(sizeof(u_buf)/sizeof(u_buf[0]))) break;
   }
 
-  if(n < params.min_tracks) return out;
+  if(n < params->min_tracks) return out;
 
   float64* tmp = (float64*)malloc(n*sizeof(float64));
   if (!tmp) return out;
@@ -201,12 +244,13 @@ DFC_t_OFlow_Output of_compute_global_flow(const uint8* prevY, const uint8* currY
   memcpy(tmp, v_buf, n*sizeof(float64));
   const float64 v_med = quickselect_imprv(tmp, n, n/2);
 
-  for(sint32 i=0;i<n;i++) { 
+  sint32 i;
+  for(i=0;i<n;i++) { 
     tmp[i] = fabs(u_buf[i]-u_med);
   }
   const float64 mad_u = quickselect_imprv(tmp, n, n/2) + 1e-3;
 
-  for(sint32 i=0;i<n;i++) {
+  for(i=0;i<n;i++) {
     tmp[i] = fabs(v_buf[i]-v_med);
   }
   const float64 mad_v = quickselect_imprv(tmp, n, n/2) + 1e-3;
@@ -214,70 +258,62 @@ DFC_t_OFlow_Output of_compute_global_flow(const uint8* prevY, const uint8* currY
   // sanity checks (false movement detection)
   // check near zero cells
   sint32 near_zero = 0;
-  for (sint32 i=0; i<n; ++i) {
+  for (i=0; i<n; ++i) {
     float64 mag = hypot(u_buf[i], v_buf[i]);
-    if (mag < params.zero_th_pxs) ++near_zero;
+    if (mag < params->zero_th_pxs) ++near_zero;
   }
   const float64 frac_zero = (float64)near_zero / (float64)n;
 
   // Quadrant medians using tmp as scratch (limit the mallocs)
   const sint32 midx = nx / 2, midy = ny / 2;
+  float64 uUL, vUL, uUR, vUR, uLL, vLL, uLR, vLR;
 
-  auto bucket_med = [&](bool left, bool up, float64& um, float64& vm) {
-    // U
-    sint32 m = 0;
-    for(sint32 i=0; i<n; ++i)
-      if((sanityBuffer_x[i] < midx) == left && (sanityBuffer_y[i] < midy) == up) tmp[m++] = u_buf[i];
-    um = (m>0) ? quickselect_imprv(tmp, m, m/2) : 0.0;
-    // V
-    m = 0;
-    for(sint32 i=0; i<n; ++i)
-      if((sanityBuffer_x[i] < midx) == left && (sanityBuffer_y[i] < midy) == up) tmp[m++] = v_buf[i];
-    vm = (m>0) ? quickselect_imprv(tmp, m, m/2) : 0.0;
-  };
+  bucket_median_uv(u_buf, v_buf, sanityBuffer_x, sanityBuffer_y, n, midx, midy, 1, 1, &uUL, &vUL, tmp);
+  bucket_median_uv(u_buf, v_buf, sanityBuffer_x, sanityBuffer_y, n, midx, midy, 0, 1, &uUR, &vUR, tmp);
+  bucket_median_uv(u_buf, v_buf, sanityBuffer_x, sanityBuffer_y, n, midx, midy, 1, 0, &uLL, &vLL, tmp);
+  bucket_median_uv(u_buf, v_buf, sanityBuffer_x, sanityBuffer_y, n, midx, midy, 0, 0, &uLR, &vLR, tmp);
 
-  float64 uUL,vUL,uUR,vUR,uLL,vLL,uLR,vLR;
-  bucket_med(true , true , uUL,vUL);
-  bucket_med(false, true , uUR,vUR);
-  bucket_med(true , false, uLL,vLL);
-  bucket_med(false, false, uLR,vLR);
+  float64 dists[6];
+  dists[0] = hypot(uUL - uUR, vUL - vUR);
+  dists[1] = hypot(uUL - uLL, vUL - vLL);
+  dists[2] = hypot(uUL - uLR, vUL - vLR);
+  dists[3] = hypot(uUR - uLL, vUR - vLL);
+  dists[4] = hypot(uUR - uLR, vUR - vLR);
+  dists[5] = hypot(uLL - uLR, vLL - vLR);
 
-  auto dist = [](float64 ax,float64 ay,float64 bx,float64 by){ return hypot(ax-bx, ay-by); };
   float64 spread = 0.0;
-  float64 dists[6] = {
-    dist(uUL,vUL,uUR,vUR), dist(uUL,vUL,uLL,vLL), dist(uUL,vUL,uLR,vLR),
-    dist(uUR,vUR,uLL,vLL), dist(uUR,vUR,uLR,vLR), dist(uLL,vLL,uLR,vLR)
-  };
-  
-  for(int k=0;k<6;++k) {
-    if (dists[k] > spread) {
-      spread = dists[k];
+  sint32 k;
+  for(k = 0; k < 6; ++k) {
+    if(dists[k] > spread) spread = dists[k];
+  }
+
+  const float64 robust_scale = hypot(mad_u, mad_v);
+  const float64 med_mag = hypot(u_med,  v_med);
+  const sint32 quadrant_consistent = (spread < params->quad_spread_gain * (robust_scale + 1e-6)) ? 1 : 0;
+  const sint32 large_bias = (med_mag > params->med_th_pxs) ? 1 : 0;
+  const sint32 majority_still_bg = (frac_zero > params->zero_maj_min) ? 1 : 0;
+  const sint32 suspect = (!quadrant_consistent) && large_bias && majority_still_bg;
+
+  sint32 inl = 0;
+  for(i = 0; i < n; i++) {
+    if(fabs(u_buf[i] - u_med) < params->mad_gate * mad_u && fabs(v_buf[i] - v_med) < params->mad_gate * mad_v) ++inl;
+  }
+
+  out.u_px_per_s = u_med;
+  out.v_px_per_s = v_med;
+
+  {
+    float64 tempQuality = (float64)inl / (float64)n;
+    if(suspect && tempQuality > params->qualityFailed) {
+      out.quality = params->qualityFailed; /* flag false movement */
+    } else {
+      out.quality = tempQuality;
     }
   }
 
-  const float64 robust_scale     = hypot(mad_u, mad_v);
-  const float64 med_mag          = hypot(u_med,  v_med);
-  const bool quadrant_consistent = (spread < params.quad_spread_gain * (robust_scale + 1e-6));
-  const bool large_bias          = (med_mag > params.med_th_pxs);
-  const bool majority_still_bg   = (frac_zero > params.zero_maj_min);
-  const bool suspect             = (!quadrant_consistent) && large_bias && majority_still_bg;
-
-  sint32 inl=0;
-  for(sint32 i=0;i<n;i++) {
-    if(fabs(u_buf[i]-u_med) < params.mad_gate*mad_u && fabs(v_buf[i]-v_med) < params.mad_gate*mad_v) ++inl;
-  }
-  out.u_px_per_s = u_med;
-  out.v_px_per_s = v_med;
-  float64 tempQuality = (float64)inl/(float64)n;
-  if(suspect && tempQuality > params.qualityFailed) {
-    out.quality = params.qualityFailed; // for flaging false drone movement (false movement detection)
-  } else {
-    out.quality = tempQuality;
-  }
-  
-  out.valid  = true;
+  out.valid = 1;
 
   if(tmp) free(tmp);
-
+  
   return out;
 }

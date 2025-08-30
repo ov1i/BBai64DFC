@@ -1,0 +1,28 @@
+ifeq ($(RULES_MAKE), )
+include $(PDK_INSTALL_PATH)/ti/build/Rules.make
+else
+include $(RULES_MAKE)
+endif
+
+APP_NAME = dfc_c66_app
+
+SRCDIR += . src src/common src/common/clusters src/common/clusters_configs \
+            src/common/clusters_configs/c66 src/core_c66x src/opticalflow src/comms
+INCDIR += interface interface/common interface/common/types src/common  
+PACKAGE_SRCS_COMMON += .
+
+CFLAGS_LOCAL_COMMON += -D_BAREMETAL $(PDK_CFLAGS)
+INCLUDE_EXTERNAL_INTERFACES += pdk $(EXTERNAL_INTERFACES) 
+
+COMP_LIST_COMMON += ipc_baremetal $(PDK_COMMON_BAREMETAL_COMP)
+
+SRCS_COMMON += main_dsp.c rsc_table.c c66_cache_mar.c oflow_c66x.c RPMsg_helper.c
+
+EXTERNAL_LNKCMD_FILE_LOCAL = $(PDK_INSTALL_PATH)/ti/drv/ipc/examples/DFC/src/common/clusters/$(ISA)/lnk_$(ISA)_$(CORE).lds
+APPEND_LNKCMD_FILE += $(PDK_INSTALL_PATH)/ti/drv/ipc/examples/DFC/src/common/clusters/memory_map_ddr.cmd
+
+ifeq ($(MAKERULEDIR), )
+  MAKERULEDIR := $(ROOTDIR)/ti/build/makerules
+  export MAKERULEDIR
+endif
+include $(MAKERULEDIR)/common.mk

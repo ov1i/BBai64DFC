@@ -14,14 +14,15 @@ extern "C" {
 #include <cstring>
 #include <cstdint>
 
-#include "imu/mpu9250.h"
-#include "barometer/bmp280.h"
-#include "ekf/ekf.h"
-#include "controller/PIDController.h"
-#include "controller/rcIA6.h"
-#include "pwm/PWMgen.h"
-#include "comms/RPMsg_helper.h"
-#include "dfc_types.h"
+#include <imu/mpu9250.h>
+#include <barometer/bmp280.h>
+#include <ekf/ekf.h>
+#include <controller/PIDController.h>
+#include <controller/rcIA6.h>
+#include <pwm/PWMgen.h>
+#include <comms/RPMsg_helper.h>
+#include <comms/TraceLogger.h>
+#include <dfc_types.h>
 
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -70,6 +71,8 @@ inline bool seq_read(const SeqLatest<T>& s, T& out){
   return (a == b) && !(b & 1u); // dump read if corrupted
 }
 
+extern "C" void routeDebugP(void);
+
 static constexpr uint32 HZ_IMU   = 200;
 static constexpr uint32 HZ_CTRL  = 200;
 static constexpr uint32 HZ_BARO  = 50;
@@ -81,8 +84,9 @@ static ekf::C_EKF            gEKF;
 static ctrl::C_PIDController gCTRL;
 static rc::C_RcIA6           gRC;
 
-static rpmsg::C_RPMsgHelper  gFromC66x;     // optical flow -> R5F
-static rpmsg::C_RPMsgHelper  gToA72;        // telemetry   -> A72
+static rpmsg::C_RPMsgHelper  gFromC66x;     // optical flow(c66x) -> R5F
+static rpmsg::C_RPMsgHelper  gToA72;        // telemetry(r5f)     -> A72
+static rpmsg::C_RPMsgHelper  gToA72Calib;   // calib data(r5f)    -> A72
 
 // init sync
 static SemaphoreP_Handle gInitDoneSem = nullptr;
@@ -94,9 +98,8 @@ static SeqLatest<DFC_t_BMP280_Data>         gBaroLatest;
 static SeqLatest<DFC_t_PIDControllerState>  gPidLatest;
 static SeqLatest<float64[3]>                gGyroLatest;
 
-static inline uint64_t now_ns() {
-  return (uint64_t)TimerP_getTimeInUsecs() * 1000ull;
-}
+static inline uint64 now_ns() { return (uint64)TimerP_getTimeInUsecs() * 1000ull; }           // both are good
+static inline uint32 now_ms() { return (uint32)(xTaskGetTickCount() * portTICK_PERIOD_MS); }  // both are good
 
 enum class EkfMsgType : uint8 { IMU, BARO, FLOW };
 
@@ -119,20 +122,50 @@ static QueueHandle_t qBARO = nullptr;
 static QueueHandle_t qFLOW = nullptr;
 static QueueSetHandle_t qSET = nullptr;
 
+
 // init first at boot
-static void initTask(void*, void*) {
+static void initTask() {
+  routeDebugP();
   UART_init(); 
   UART_stdioInit(0);
   rpmsg::C_RPMsgHelper::init();
 
   UART_printf("[R5F] init…\r\n");
+  DebugP_log0("[R5F] init…\r\n");
 
-  while(!gIMU.init())  { UART_printf("[R5F] IMU init retry\r\n");  vTaskDelay(pdMS_TO_TICKS(200)); }
-  while(!gBARO.init()) { UART_printf("[R5F] BARO init retry\r\n"); vTaskDelay(pdMS_TO_TICKS(200)); }
+  // IMU & BARO drivers
+  while(!gIMU.init())  { 
+    UART_printf("[R5F] IMU init retry\r\n");
+    DebugP_log0("[R5F] IMU init retry\r\n"); 
+    vTaskDelay(pdMS_TO_TICKS(200)); 
+  }
+  while(!gBARO.init()) { 
+    UART_printf("[R5F] BARO init retry\r\n"); 
+    DebugP_log0("[R5F] BARO init retry\r\n"); 
+    vTaskDelay(pdMS_TO_TICKS(200)); 
+  }
 
-  /// TODO: implement simple gyro bias capture calib (~2–3s still on bench)
+  // RC driver 
+  DFC_t_RcParams rcParams{};
+  while(!gRC.init(rcParams)) { 
+    DebugP_log0("[R5F] RC reader init retry\r\n"); 
+    vTaskDelay(pdMS_TO_TICKS(200)); 
+  }
+
+  // PWM 
+  DFC_t_PWMgen_Params pwmParams{};
+  while(!PWMgen::init(pwmParams)) { 
+    UART_printf("[R5F] PWM generator init retry\r\n"); 
+    DebugP_log0("[R5F] PWM generator init retry\r\n"); 
+    vTaskDelay(pdMS_TO_TICKS(200)); 
+  }
+
+  if (PWMgen::detectESCCalibrationGesture(gRC, 3000, 300)) {
+    PWMgen::calibrateESC(4000, 2000);
+  }
 
   gBARO.ground_reset();
+
   {
     const uint32 duration = pdMS_TO_TICKS(1500);
     const uint32 step = pdMS_TO_TICKS(1000 / HZ_BARO);
@@ -148,29 +181,137 @@ static void initTask(void*, void*) {
 
   if(!gBARO.ground_finalize()) {
     UART_printf("[R5F] BARO ground finalize: not enough samples falling back.\r\n");
+    DebugP_log0("[R5F] BARO ground finalize: not enough samples falling back.\r\n");
   } else {
     UART_printf("[R5F] BARO P0 set.\r\n");
+    DebugP_log0("[R5F] BARO P0 set.\r\n");
   }
 
-  // EKF params & reset to current time 
-  DFC_t_EKF_Params ekfParams{};
-  gEKF.setParams(ekfParams);
-  gEKF.reset(now_ns());
+  // Bias calculation for gyro
+  float64 bg[3] = { 0 } ;
+  gIMU.getCalibrationGyroBias(3000, &bg[0]); // EVERY BOOT SHOULD BE DONE
 
-  // PWM + Controller params
-  DFC_t_PWMgen_Params pwmParams{};
-  PWMgen::init(pwmParams);
+  while(!gToA72Calib.open(A72_procID, "r5f_to_a72_calib", "a72_from_r5f_calib")) {
+      UART_printf("[R5F] RPMsg pipe between R5F and A72 retry\r\n");
+      DebugP_log0("[R5F] RPMsg pipe between R5F and A72 retry\r\n");
+      vTaskDelay(pdMS_TO_TICKS(200));       
+  };
 
+  const uint32 timeout = xTaskGetTickCount() + pdMS_TO_TICKS(60000); // about 1 min timeout
+  while(!gToA72Calib.isDstReady() && xTaskGetTickCount() < timeout) {
+    gToA72Calib.tryResolve(100); // we need to make sure the calib end can be reached
+    vTaskDelay(pdMS_TO_TICKS(500));
+  }
+  const bool fullCalib = gToA72Calib.isDstReady();
+
+  if(PWMgen::detectFULLCalibrationGesture(gRC, 5000, 300) && fullCalib) {
+    UART_printf("[R5F] ACC+MAG capture START (45000 ms)\r\n");
+    DebugP_log0("[R5F] ACC+MAG capture START (45000 ms)\r\n");
+
+    DFC_t_CalibChunk chunk{};
+    chunk.magic = DFC_CALI_MAGIC;
+    chunk.seq   = 0;
+    chunk.count = 0;
+
+    const uint32 calibDuration  = pdMS_TO_TICKS(45000);
+    uint32 calibStart = xTaskGetTickCount();
+    uint32 ts = calibStart;
+
+    const uint16 max_chunk_size = (uint16)(sizeof(chunk.payload)/sizeof(chunk.payload[0]));
+    uint32 sent = 0, kept = 0;
+
+    while ((xTaskGetTickCount() - calibStart) < calibDuration) {
+      vTaskDelayUntil(&ts, pdMS_TO_TICKS(10));
+
+      float64 a[3], m[3];
+      gIMU.getRawAccMagSample(&a[0], &m[0]);
+
+      auto &s = chunk.payload[chunk.count];
+      s.ax = (float32)a[0]; s.ay = (float32)a[1]; s.az = (float32)a[2];
+      s.mx = (float32)m[0]; s.my = (float32)m[1]; s.mz = (float32)m[2];
+
+      chunk.count++; 
+      kept++;
+
+      if (chunk.count == max_chunk_size) {
+        (void)gToA72Calib.send(&chunk, (int)sizeof(DFC_t_CalibChunk));
+        chunk.seq++;
+        chunk.count = 0;
+        sent++;
+      }
+    }
+    // flush partial chunk
+    if(chunk.count > 0) {
+      sint32 size = (sint32)(offsetof(DFC_t_CalibChunk, payload) + chunk.count*sizeof(DFC_t_CalibSample));
+      (void)gToA72Calib.send(&chunk, size);
+      sent++;
+    }
+    UART_printf("[R5F] Calib capture DONE: chunks=%u samples=%u\r\n", sent, kept);
+    DebugP_log0("[R5F] Calib capture DONE: chunks=%u samples=%u\r\n", sent, kept);
+  }
+
+  // EKF params & reset to current time
+  {
+  const uint32 calibStart = xTaskGetTickCount();
+  const uint32 calibDuration = pdMS_TO_TICKS(1200);
+
+  float64 ax = 0,ay = 0,az = 0;  
+  uint32 sampleCountAcc = 0;
+
+  float64 mx = 0,my = 0,mz = 0;  
+  uint32 sampleCountMag = 0;
+
+  uint32 ts = calibStart;
+  while((xTaskGetTickCount() - ts) < calibDuration) {
+    if(gIMU.update()) {
+      auto data = gIMU.getData();
+      ax += data.ax; 
+      ay += data.ay; 
+      az += data.az; 
+      sampleCountAcc++;
+
+      if(data.mag_rdy) { 
+        mx += data.mx; 
+        my += data.my; 
+        mz += data.mz; 
+        sampleCountMag++; }
+    }
+    vTaskDelayUntil(&ts, pdMS_TO_TICKS(5));
+  }
+
+  const bool fuseMag = (sampleCountMag >= 10);
+  const float64 decl = 0.087266; // ROMANIA MAG DECLINATION in rad/s (4-6 degree -> we pick 5 degree)
+  // this means the geographic north is referenced with about 5 degree from the actual magnetic north
+  // every year is differen hence we need new calib every year (shifts daily)
+
+  gEKF.graceful_state_init( sampleCountAcc ? ax/sampleCountAcc : 0, 
+                          sampleCountAcc ? ay/sampleCountAcc : 0, 
+                          sampleCountAcc ? az/sampleCountAcc : 0,
+                          sampleCountMag ? mx/sampleCountMag : 0, 
+                          sampleCountMag ? my/sampleCountMag : 0, 
+                          sampleCountMag ? mz/sampleCountMag : 0,
+                          fuseMag, bg, decl, now_ns());
+  UART_printf("[R5F] EKF graceful init done");
+  DebugP_log0("[R5F] EKF graceful init done");
+  }
+
+  // PID controller init + params
   DFC_t_PIDController_Params ctrlParams{};
   gCTRL.init(ctrlParams);
 
-  // RC driver 
-  DFC_t_RcParams rcParams{};
-  gRC.init(rcParams);
-
   // RPMsg endpoints 
-  gFromC66x.open(DFC_t_ProcIDs::C66, "r5f_from_c66x", nullptr);         // oflow
-  gToA72.open(DFC_t_ProcIDs::A72, "r5f_to_a72", "a72_from_r5f");        // telemetry
+  while(!gFromC66x.open(C66_procID, "r5f_from_c66x", nullptr)) {
+    UART_printf("[R5F] RPMsg pipe between R5F and C66X retry\r\n");
+    DebugP_log0("[R5F] RPMsg pipe between R5F and C66X retry\r\n");
+    vTaskDelay(pdMS_TO_TICKS(200));       
+  }
+
+  while(!gToA72.open(A72_procID, "r5f_to_a72", "a72_from_r5f")) {
+    UART_printf("[R5F] RPMsg pipe between R5F and A72 retry\r\n");
+    DebugP_log0("[R5F] RPMsg pipe between R5F and A72 retry\r\n");
+    vTaskDelay(pdMS_TO_TICKS(200));       
+  } 
+
   for(uint8 i = 0; i < 50 && !gToA72.isDstReady(); ++i) {
     gToA72.tryResolve(100);
   }
@@ -180,7 +321,7 @@ static void initTask(void*, void*) {
 }
 
 // IMU: 200 Hz -> qIMU
-static void imuTask(void*, void*) {
+static void imuTask(void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
   uint32 last = xTaskGetTickCount();
   const uint32 per = pdMS_TO_TICKS(1000 / HZ_IMU);
@@ -208,7 +349,7 @@ static void imuTask(void*, void*) {
 }
 
 // BARO: 50 Hz -> qBARO
-static void baroTask(void*, void*) {
+static void baroTask(void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
   uint32 last = xTaskGetTickCount();
   const uint32 step = pdMS_TO_TICKS(1000 / HZ_BARO);
@@ -231,7 +372,7 @@ static void baroTask(void*, void*) {
 }
 
 // Optical flow (blocking recv) -> qFLOW
-static void flowTask(void*, void*) {
+static void flowTask(void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
 
   for (uint8 i = 0; i < 40 && !gFromC66x.isDstReady(); ++i) {
@@ -253,7 +394,7 @@ static void flowTask(void*, void*) {
 }
 
 // RC reader (fast poll, ~250 Hz) -> snapshot only (controller reads it)
-static void rcTask(void*, void*) {
+static void rcTask(void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
   for (;;) {
     gRC.update();
@@ -265,7 +406,7 @@ static void rcTask(void*, void*) {
 
 // EKF worker (single owner of gEKF)
 // Pulls from a QueueSet so messages are handled in arrival order.
-static void ekfTask(void*, void*) {
+static void ekfTask(void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
 
   for (;;) {
@@ -293,7 +434,7 @@ static void ekfTask(void*, void*) {
 }
 
 // controller (triggered by IMU rate)
-static void ctrlTask(void*, void*) {
+static void ctrlTask(void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
   uint32 last = xTaskGetTickCount();
   const uint32 step = pdMS_TO_TICKS(1000 / HZ_CTRL);
@@ -316,7 +457,7 @@ static void ctrlTask(void*, void*) {
 }
 
 // telemetry: 50 Hz 
-static void telemTask(void*, void*) {
+static void telemTask(void*) {
   SemaphoreP_pend(gInitDoneSem, SemaphoreP_WAIT_FOREVER);
   uint32 last = xTaskGetTickCount();
   const uint32 step = pdMS_TO_TICKS(1000 / HZ_TELEM);
@@ -385,7 +526,7 @@ static void telemTask(void*, void*) {
     m.of_u          = (float32)st_cache.oflow_u; 
     m.of_v          = (float32)st_cache.oflow_v; 
     m.of_quality    = (float32)st_cache.oflow_quality; 
-    m.of_valid      = (float32)st_cache.oflow_valid;
+    m.of_valid      = st_cache.oflow_valid;
 
     // Motors + PID setpoints
     m.m0 = pid_cache.m1;
@@ -405,7 +546,15 @@ static void telemTask(void*, void*) {
     m.pos_sp_valid  = pid_cache.pos_sp_valid ? 1u : 0u;
 
     // Send to A72 via RPMsg
-    (void)gToA72.send(&m, (int)sizeof(m));
+    if (gToA72.isDstReady()) {
+      (void)gToA72.send(&m, (sint32)sizeof(m));
+    } else {
+      static uint32 resolve_tick = 0;
+      if((resolve_tick++ & 0x7D0) == 0) {
+        (void)gToA72.tryResolve(100);   
+      }
+      // DROP TELEMETRY FRAME BY DEFAULT IF NO DST
+    }
   }
 }
 
@@ -434,4 +583,6 @@ int main(void) {
 
   vTaskStartScheduler();
   for(;;){} // should never return
+
+  return 0;
 }

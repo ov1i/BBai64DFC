@@ -150,6 +150,123 @@ buildFactory() {
     fi
 }
 
+buildFreeRTOSdep() {
+    echo "Rebuilding FreeRTOS with custom config..."
+
+    local BTYPE="${BTYPE:-release}"
+    local CORE="${CORE:-mcu2_0}"
+    local CORE_ALIAS="${CORE_ALIAS:-r5f}"
+    local SOC="${SOC:-j721e}"
+    local KEEP_PATCHED_conf="${KEEP_PATCHED_conf:-0}"   # set to 1 to keep header patched
+
+    local PSDK_RTOS_PATH
+    PSDK_RTOS_PATH=$(find "$HOME/ti" -maxdepth 1 -type d -name "ti-processor-sdk-rtos-*" | head -n1)
+    if [ -z "$PSDK_RTOS_PATH" ]; then
+        echo "ERROR: PSDK RTOS not found under \$HOME/ti"
+        gracefull_exit -5
+    fi
+    local PDK_PATH="$PSDK_RTOS_PATH/pdk_jacinto_11_00_00_21/packages"
+
+    local conf
+    conf=$(find "$PDK_PATH" -path "*/kernel/freertos/config/j721e/r5f/FreeRTOSConfig.h" | head -n1)
+    if [ -z "$conf" ]; then
+        # fallback search if layout differs
+        conf=$(grep -RIl "TI_FREERTOS_CONFIG_H" "$PDK_PATH" 2>/dev/null | head -n1)
+    fi
+    if [ -z "$conf" ] || [ ! -f "$conf" ]; then
+        echo "ERROR: Could not locate FreeRTOSConfig.h aggregator in PDK."
+        gracefull_exit -5
+    fi
+
+    echo "Patching..: $conf"
+    local BAK="${conf}.bak_queuesets_$(date +%s)"
+    cp "$conf" "$BAK" || { echo "ERROR: backup failed"; gracefull_exit -5; }
+
+    # Flip configUSE_QUEUE_SETS = 1
+    sed -Ei \
+        -e 's@(^[[:space:]]*#\s*define\s+configUSE_QUEUE_SETS)[[:space:]]*\(([01])\)@\1 (1)@' \
+        -e 's@(^[[:space:]]*#\s*define\s+configUSE_QUEUE_SETS)[[:space:]]+([01])@\1 1@' \
+        "$conf"
+
+    # Ensure INCLUDE_xTaskDelayUntil is enabled (add if missing)
+    if grep -Eq '^[[:space:]]*#\s*define\s+INCLUDE_xTaskDelayUntil\b' "$conf"; then
+        sed -Ei \
+            -e 's@(^[[:space:]]*#\s*define\s+INCLUDE_xTaskDelayUntil)[[:space:]]*\(([01])\)@\1 (1)@' \
+            -e 's@(^[[:space:]]*#\s*define\s+INCLUDE_xTaskDelayUntil)[[:space:]]+([01])@\1 1@' \
+            "$conf"
+    else
+        printf "\n#define INCLUDE_xTaskDelayUntil (1)\n" >> "$conf"
+    fi
+    
+    # Clean & rebuild FreeRTOS prebuilt lib for the target
+    pushd "$PDK_PATH/ti/build" >/dev/null || { echo "ERROR: enter build dir"; mv -f "$BAK" "$conf"; gracefull_exit -5; }
+
+    # CAREFUL FOR PATHING
+    kernel_dir="$PDK_PATH/ti/binary/kernel"
+    symbols_req="vTaskStartScheduler xTaskCreate vTaskSwitchContext vPortEnterCritical vPortExitCritical xQueueGenericSend xQueueReceive"
+    
+    echo "Attempt clear of the freertos comp…" 
+    ok=1
+    if [ -d "$kernel_dir" ]; then
+        # we collect R5F objs/libs in the kernel
+        readarray -d '' CAND < <(find "$kernel_dir/obj/$SOC/$CORE/$BTYPE" -type f \
+        \( -name '*.oer5f' -o -name '*.aer5f' \) -print0 2>/dev/null)
+
+        if ((${#CAND[@]} == 0)); then
+            echo "No *.oer5f/*.aer5f found in: $kernel_dir"
+            ok=0
+        else
+            echo "Found ${#CAND[@]} files under $kernel_dir"
+
+            # we build a unique set of defined symbol names from those files
+            readSymbols=$(nm -A --defined-only "${CAND[@]}" 2>/dev/null | awk '{print $NF}' | sort -u)
+
+            # check for the required symbols
+            missing=()
+            for s in $SYMS; do
+                grep -Fxq -- "$s" <<<"$readSymbols" || missing+=("$s")
+            done
+
+            if ((${#missing[@]} == 0)); then
+                echo "All required symbols present."
+            else
+                echo "We found missing symbols:" "${missing[@]}"
+                ok=0
+            fi
+        fi
+    else
+        echo "No dir present!";
+    fi
+
+    if [ "$ok" -eq 0 ]; then
+        echo "No clear needed!"
+    else
+        echo "Clear started!"
+        sudo rm -rf "$kernel_dir"
+    fi
+    
+    echo "Building freertos…"
+    gmake -s freertos CORE="$CORE" OS=linux || {
+        echo "ERROR: freertos build failed"
+        popd >/dev/null
+        mv -f "$BAK" "$conf"
+        gracefull_exit -5
+    }
+    popd >/dev/null
+
+    # Restore header to keep SDK pristine
+    if [ "$KEEP_PATCHED_conf" -ne 1 ]; then
+        mv -f "$BAK" "$conf"
+        echo "Config restored to original (library remains rebuilt with queue sets)."
+    else
+        echo "Config left patched. Backup at: $BAK"
+    fi
+
+    # Show where the library lives
+    echo "Done. The rebuilt FreeRTOS lib is under:"
+    find "$PDK_PATH/ti/kernel/freertos" -type f -name "freertos.*er5f" -o -name "freertos.*aer5f" 2>/dev/null | sed 's/^/  - /'
+}
+
 buildCustomSW() {
     echo "Building started.."
     sudo bash -c 'echo 0 > /proc/sys/kernel/apparmor_restrict_unprivileged_userns'
@@ -160,12 +277,11 @@ buildCustomSW() {
         gracefull_exit -3
     fi
 
-    # bitbake -ccleansstate linux-bb.org
-    # bitbake -ccleansstate firmwares
-    # bitbake -ccleansstate env-init
-    # bitbake linux-bb.org
-    # bitbake firmware-image
-    bitbake firmwares
+    bitbake -ccleansstate linux-bb.org
+    bitbake -ccleansstate firmwares
+    bitbake -ccleansstate env-init
+    bitbake linux-bb.org
+    bitbake firmware-image
 
     if [ $? -ne 0 ]; then
         echo "Failed to build the project."
@@ -180,9 +296,10 @@ buildFirmwares() {
     PDK_PATH=$PSDK_RTOS_PATH/pdk_jacinto_11_00_00_21/packages
     REPO_ROOT=${PWD}
     APP_PATH=${PDK_PATH}/ti/drv/ipc/examples/DFC
-    MK_FILE="${APP_PATH}/DFC_component.mk"
+    MK_FILE="${APP_PATH}/DFC_*.mk"
     BACKUP_SUFFIX=".bak"
     BUILD_ERR=0
+    TARGET="${PDK_PATH}/ti/drv/ipc/ipc_component.mk"
 
     rm -rf $APP_PATH
     cp -r $REPO_ROOT/core $APP_PATH
@@ -194,41 +311,50 @@ buildFirmwares() {
     if [ ! -f "${PDK_PATH}/ti/drv/ipc/ipc_component.mk${BACKUP_SUFFIX}" ]; then
         cp "${PDK_PATH}/ti/drv/ipc/ipc_component.mk" "${PDK_PATH}/ti/drv/ipc/ipc_component.mk${BACKUP_SUFFIX}"
     fi
+    
+    for f in "$APP_PATH"/DFC_*.mk; do
+        grep -qF "$(head -n1 "$f")" "$TARGET" || cat "$f" >> "$TARGET"
+    done
 
-    cat "$MK_FILE" >> "${PDK_PATH}/ti/drv/ipc/ipc_component.mk"
+    cd $PDK_PATH/ti/build
+
+    gmake -S CORE=mcu2_0 OS=linux pdk_libs
     if [ $? -ne 0 ]; then
-        echo "Failed to add the DFC_component to the list of buildables."
+        echo "Failed to build deps for the R5F firmware."
         BUILD_ERR=-3
     fi
 
-    cd $PDK_PATH/ti/build
+    gmake -S CORE=c66xdsp_1 OS=linux pdk_libs
+    if [ $? -ne 0 ]; then
+        echo "Failed to build deps for the C66X firmware."
+        BUILD_ERR=-3
+    fi
+    
+    buildFreeRTOSdep
+
+    echo ":::::::::NOTE: STARTED R5F MCU2_0 MAIN ISLAND CORE IDX 1 FIRMWARE BUILD..:::::::::"
     gmake -S CORE=mcu2_0 OS=linux dfc_app
     if [ $? -ne 0 ]; then
         echo "Failed to build firmwares."
         BUILD_ERR=-3
     fi
 
-    # gmake -S pdk_libs
-    # if [ $? -ne 0 ]; then
-    #     echo "Failed to build firmwares."
-    #     BUILD_ERR=-3
-    # fi
+    echo ":::::::::NOTE: STARTED C66X CORE IDX 1 FIRMWARE BUILD..:::::::::"
+    gmake -S CORE=c66xdsp_1 OS=linux dfc_c66_app
+    if [ $? -ne 0 ]; then
+        echo "Failed to build firmwares."
+        BUILD_ERR=-3
+    fi
 
     if [ ! -d "$REPO_ROOT/.build/firmwares" ]; then
         mkdir -p $REPO_ROOT/.build/firmwares
     fi
 
-    cp -r "${PDK_PATH}/ti/binary/dfc_app" "${REPO_ROOT}/.build/firmwares"
+    cp -r "${PDK_PATH}/ti/binary/"dfc_* "${REPO_ROOT}/.build/firmwares"
     if [ $? -ne 0 ]; then
         echo "Failed to copy firmwares to the output dir please check the SDK/PDK binary dir."
         BUILD_ERR=-3
     fi
-
-    # gmake -S clean dfc_app
-    # if [ $? -ne 0 ]; then
-    #     echo "Failed to clear the binaries from the sdk.."
-    #     BUILD_ERR=-3
-    # fi
 
     mv "${PDK_PATH}/ti/drv/ipc/ipc_component.mk${BACKUP_SUFFIX}" "${PDK_PATH}/ti/drv/ipc/ipc_component.mk"
     if [ $? -ne 0 ]; then
@@ -284,6 +410,7 @@ menuWrapper() {
         echo -e "\t-etest:\t Build and execute the gtests for the sw"
         echo -e "\t-liteclean:\t Clean build artifacts"
         echo -e "\t-fullclean:\t Clean build artifacts"
+        echo -e "\t-rebuildfr:\t Rebuild FreeRTOS with custom config"
         
         exit -1
     fi
@@ -317,6 +444,10 @@ menuWrapper() {
         logger 1
         clean_artifacts_lite
         gracefull_exit 1
+    elif [ "$1" == "-rebuildfr" ] || [ "$1" == "-rfr" ]; then
+        logger 1
+        buildFreeRTOSdep
+        gracefull_exit 1
     else 
         echo "Error: Invalid argument"
         echo "Usage: $0 [option] ..."
@@ -328,6 +459,7 @@ menuWrapper() {
         echo -e "\t-sync:\t\t Sync the enviroment"
         echo -e "\t-liteclean:\t Clean build artifacts"
         echo -e "\t-fullclean:\t Clean build artifacts"
+        echo -e "\t-rebuildfr:\t Rebuild FreeRTOS with custom config"
 
         exit -1
     fi

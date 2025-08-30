@@ -2,44 +2,31 @@
 #include <string.h>
 #include "rsc_table.h"
 
-#define VRING_ALIGN         (4096U)
-#define VRING_NUM           (256U)
-#define TRACE_BUFSIZE       (16U * 1024U)
+#define VRING_ALIGN  (4096U)
+#define VRING_NUM    (256U)
 
 // macro wrapper for offsetof
 #ifndef OFFSETOF
 #define OFFSETOF(type, member) ((uint32)offsetof(type, member)) 
 #endif
 
-static void setName(uint8 dst[32], const char *name) {
+static void setName(uint8 dst[32], const char *name)
+{
     size_t n = strlen(name);
     if (n > 31) n = 31;
     memset(dst, 0, 32);
     memcpy(dst, name, n);
 }
 
-
-uint8 trace_buf[TRACE_BUFSIZE]  __attribute__((section(".tracebuf"), aligned(8), used));
-
 const struct my_resource_table resourceTable __attribute__((section(".resource_table"), aligned(4096), used)) = {
     .base = {
         .ver = 1U,
-        .num = 2U,
+        .num = 1U,
         .reserved = { 0U, 0U }
     },
 
     .offset = {
-        OFFSETOF(struct my_resource_table, trace),
         OFFSETOF(struct my_resource_table, vdev_rpmsg),
-        // OFFSETOF(struct my_resource_table, carveout_vision_tele),
-    },
-
-    .trace = {
-        .type     = RSC_TRACE,
-        .da       = (uint32)(uintptr_t)&trace_buf[0],                  /* let host allocate address */
-        .len      = TRACE_BUFSIZE,
-        .reserved = 0U,
-        .name     = "trace:mcu2_0",                 /* filled in ctor below (optional) */
     },
 
     .vdev_rpmsg = {
@@ -64,22 +51,11 @@ const struct my_resource_table resourceTable __attribute__((section(".resource_t
         .align    = VRING_ALIGN,
         .num      = VRING_NUM,
         .notifyid = 0U,                  /* host will fill */
-    },
-
-    // .carveout_vision_tele = {
-    //     .type     = RSC_CARVEOUT,
-    //     .da       = VISU_TELE_REGION_PA,
-    //     .pa       = VISU_TELE_REGION_PA,
-    //     .len      = VISU_TELE_SIZE,
-    //     .flags    = 0U,
-    //     .reserved = 0U,
-    //     .name     = {0},
-    // }
+    }
 };
 
 
-__attribute__((constructor))
-static void rsc_ctor_fill_names(void) {
-    setName((uint8*)resourceTable.trace.name, "trace:mcu2_0");
-    // setName((uint8*)resourceTable.carveout_vision_tele.name, "visu_tele");
+__attribute__((constructor)) static void rsc_ctor_fill_names(void) {
+    
+    (void)setName; /* suppress unused warning for the const */
 }

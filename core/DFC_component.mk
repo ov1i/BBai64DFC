@@ -5,7 +5,7 @@ dfc_app_BOARD_DEPENDENCY = yes
 dfc_app_CORE_DEPENDENCY = yes
 
 dfc_app_XDC_CONFIGURO = no
-dfc_app_MAKEFILE = -f makefile BUILD_OS_TYPE=freertos
+dfc_app_MAKEFILE = -f makefile_r5 BUILD_OS_TYPE=freertos
 dfc_app_PKG_LIST = dfc_app
 dfc_app_INCLUDE = $(dfc_app_PATH)
 dfc_app_BOARDLIST = j721e_evm

@@ -18,14 +18,14 @@
 #include "common/types/shared_types.h"
 
 static volatile sig_atomic_t g_run = 1;
-static void on_sigint(int){ g_run = 0; }
+static void on_sigint(sint32){ g_run = 0; }
 
 static inline uint64 now_ns(){
   struct timespec ts; clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
   return (uint64)ts.tv_sec*1000000000ull + (uint64)ts.tv_nsec;
 }
 
-static int rpmsg_open(const char* svc_name){
+static sint32 rpmsg_open(const char* svc_name){
   DIR* d = opendir("/sys/class/rpmsg");
   if(!d) return -1;
   struct dirent* e; 
@@ -47,7 +47,7 @@ static int rpmsg_open(const char* svc_name){
     
     if(strcmp(name, svc_name)==0){
       snprintf(devnode,sizeof(devnode),"/dev/%s", e->d_name);
-      int fd = open(devnode, O_RDWR|O_CLOEXEC);
+      sint32 fd = open(devnode, O_RDWR|O_CLOEXEC);
       closedir(d);
       return fd;
     }
@@ -73,17 +73,17 @@ static inline void yuyv2yPadded(const uint8* yuyv, uint32 width, uint32 height, 
   }
 }
 
-int main(int argc, char** argv){
+sint32 main(sint32 argc, char** argv){
   const char* camDev = (argc>1)? argv[1] : "/dev/video0";
   const char* rpmsgName = "c66x_from_a72";
-  for(int i=1;i<argc;i++) {
+  for(sint32 i=1;i<argc;i++) {
     if(strncmp(argv[i],"--rpmsg-name=",13)==0) {
       rpmsgName = argv[i]+13;
     }
   }
   signal(SIGINT, on_sigint);
 
-  int memfd=-1, vfd=-1, rpfd=-1; 
+  sint32 memfd=-1, vfd=-1, rpfd=-1; 
   void* map_base=MAP_FAILED; 
   size_t map_len=0;
   DFC_t_ImageHeader* pImageHeader[2] = {nullptr,nullptr}; 
@@ -123,12 +123,12 @@ int main(int argc, char** argv){
     pImageHeader[1]=(DFC_t_ImageHeader*)(base+getImagePortSize());
     img[1]=(uint8*)pImageHeader[1]+sizeof(DFC_t_ImageHeader);
 
-    for(int s=0;s<2;++s) {
+    for(sint32 s=0;s<2;++s) {
       memset(pImageHeader[s],0,sizeof(*pImageHeader[s]));
 
-      pImageHeader[s]->width=width; 
-      pImageHeader[s]->height=height; 
-      pImageHeader[s]->stride=width;
+      pImageHeader[s]->width=IMG_W; 
+      pImageHeader[s]->height=IMG_H; 
+      pImageHeader[s]->stride=IMG_W;
       pImageHeader[s]->size=(uint32)getImageDataSize(); 
       pImageHeader[s]->seqLock=0;
       pImageHeader[s]->duration=0.0;
@@ -149,8 +149,8 @@ int main(int argc, char** argv){
 
     v4l2_format fmt{}; 
     fmt.type=V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width=width; 
-    fmt.fmt.pix.height=height;
+    fmt.fmt.pix.width=IMG_W; 
+    fmt.fmt.pix.height=IMG_H;
     fmt.fmt.pix.pixelformat=V4L2_PIX_FMT_YUYV; 
     fmt.fmt.pix.field=V4L2_FIELD_NONE;
 
@@ -166,8 +166,8 @@ int main(int argc, char** argv){
 
     v4l2_streamparm parm{}; 
     parm.type=V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    parm.parm.capture.timeperframe.numerator=1;
-    parm.parm.capture.timeperframe.denominator=fps;
+    parm.parm.capture.timeperframe.numerator = 1;
+    parm.parm.capture.timeperframe.denominator = FPS;
     (void)ioctl(vfd, VIDIOC_S_PARM, &parm);
 
     v4l2_requestbuffers req{}; 
@@ -231,17 +231,19 @@ int main(int argc, char** argv){
     }
 
     // Run a marathon
-    printf("ISP: %ux%u YUYV→GRAY8 → DDR @ 0x%08llX [slot0|slot1], RPMsg to '%s'\n", (unsigned)width,(unsigned)height,(unsigned long long)baseAddr,rpmsgName);
+    printf("ISP: %ux%u YUYV→GRAY8 → DDR @ 0x%08llX [slot0|slot1], RPMsg to '%s'\n", (unsigned)IMG_W,(unsigned)IMG_H,(unsigned long long)baseAddr,rpmsgName);
 
-    const size_t yuyvSize = (size_t)width*(size_t)height*2;
+    const size_t yuyvSize = (size_t)IMG_W*(size_t)IMG_H*2;
     uint8 slot = SLOT_CURR;
+    uint64 last_retry_ns = 0;
+    const uint64 retry_ns = 1000000000ULL; // 1s
 
     while(g_run) {
       pollfd pfd{};
       pfd.fd=vfd;
       pfd.events=POLLIN;
 
-      int pr=poll(&pfd,1,1000);
+      sint32 pr=poll(&pfd,1,1000);
       if(pr<0) { 
         if(errno==EINTR) continue; 
         perror("poll"); 
@@ -281,11 +283,23 @@ int main(int argc, char** argv){
 
       const uint64 t1=now_ns();
       pImageHeader[slot]->ts_ns=t1; 
-      pImageHeader[slot]->duration=(double)(t1-t0)/1e9;
+      pImageHeader[slot]->duration=(float64)(t1-t0)/1e9;
 
       __sync_synchronize(); 
       pImageHeader[slot]->seqLock++; 
       __sync_synchronize();
+
+      if (rpfd < 0) {
+        uint64 now = now_ns();
+        if (now - last_retry_ns >= retry_ns) {
+          sint32 newfd = rpmsg_open(rpmsgName);
+          if (newfd >= 0) {
+              rpfd = newfd;
+              fprintf(stderr, "ISP: RPMsg '%s' is now available\n", rpmsgName);
+          }
+          last_retry_ns = now;
+          }
+      }
 
       if(rpfd>=0) {
         DFC_t_MsgFrameReady m{}; 

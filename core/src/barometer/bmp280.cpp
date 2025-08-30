@@ -6,12 +6,13 @@
 #include <utils.h>
 
 extern "C" {
+#include <FreeRTOS.h>
 #include <ti/csl/csl_types.h>
 #include <ti/csl/csl_utils.h>
 #include <ti/drv/i2c/i2c.h>
 #include <ti/drv/i2c/soc/i2c_soc.h>
-#include <ti/drv/uart/UART.h>
-#include <ti/drv/uart/UART_stdio.h>
+#include <ti/osal/TaskP.h>
+
 }
 
 namespace baro {
@@ -34,7 +35,7 @@ bool C_BMP280::init() {
   m_i2cHandler.writeRegSingletVal(BMP280_ADDRESS, temp);
 
   if (!updateInternalCalibReg()) {
-    UART_printf("[BMP280] Calib read FAILED\r\n");
+      DebugP_log0("[BMP280] Calib read FAILED\r\n");
     return false;
   }
 
@@ -42,7 +43,7 @@ bool C_BMP280::init() {
   temp[0] = BMP280_CONFIG_REG;
   temp[1] = 0x10;
   if (!m_i2cHandler.writeRegSingletVal(BMP280_ADDRESS, temp)) {
-    UART_printf("[BMP280] Config setting FAILED\r\n");
+      DebugP_log0("[BMP280] Config setting FAILED\r\n");
     return false;
   }
 
@@ -50,29 +51,31 @@ bool C_BMP280::init() {
   temp[0] = BMP280_CTRL_MES_REG;
   temp[1] = 0x33;
   if (!m_i2cHandler.writeRegSingletVal(BMP280_ADDRESS, temp)) {
-    UART_printf("[BMP280] Setting of the ctrl_meas FAILED\r\n");
+      DebugP_log0("[BMP280] Setting of the ctrl_meas FAILED\r\n");
     return false;
   }
 
-  UART_printf("[BMP280] Init OK");
+    DebugP_log0("[BMP280] Init OK");
   return true;
 }
 
 bool C_BMP280::update() {
   uint8 status;
-  if (!m_i2cHandler.rw(BMP280_ADDRESS, &BMP280_STATUS_REGISTER, 1, &status, 1)) {
-    UART_printf("Failed to read BMP status register\r\n");
+  uint8 reg = BMP280_STATUS_REGISTER;
+  if (!m_i2cHandler.rw(BMP280_ADDRESS, &reg, 1, &status, 1)) {
+      DebugP_log0("Failed to read BMP status register\r\n");
     return false;
   }
   
   if (status & 0x8) {
-    UART_printf("BMP data not ready\r\n");
+      DebugP_log0("BMP data not ready\r\n");
     return false;
   }
 
   uint8 tempBuffer[6];
-  if (!m_i2cHandler.rw(BMP280_ADDRESS, &BMP280_PMSB_DATA_REGISTER, 1, tempBuffer, 6)) {
-    UART_printf("[BMP280] read FAILED\r\n");
+  reg = BMP280_PMSB_DATA_REGISTER;
+  if (!m_i2cHandler.rw(BMP280_ADDRESS, &reg, 1, tempBuffer, 6)) {
+      DebugP_log0("[BMP280] read FAILED\r\n");
     return false;
   }
   sint32 rawPressure = (sint32)((tempBuffer[0] << 12) | (tempBuffer[1] << 4) | (tempBuffer[2] >> 4));
@@ -86,7 +89,8 @@ bool C_BMP280::update() {
 
 bool C_BMP280::updateInternalCalibReg() {
   uint8 tempBuffer[24];
-  if (!m_i2cHandler.rw(BMP280_ADDRESS, &BMP280_T1_CALIB_ADDR, 1, tempBuffer, sizeof(tempBuffer))) return false;
+  uint8 reg = BMP280_T1_CALIB_ADDR;
+  if (!m_i2cHandler.rw(BMP280_ADDRESS, &reg, 1, tempBuffer, sizeof(tempBuffer))) return false;
 
   m_data.calibration_data.dig_T1 = (uint16)(tempBuffer[1] << 8 | tempBuffer[0]);
   m_data.calibration_data.dig_T2 = (sint16)(tempBuffer[3] << 8 | tempBuffer[2]);

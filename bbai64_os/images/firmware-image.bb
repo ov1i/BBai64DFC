@@ -17,8 +17,9 @@ iproute2 \
 network-remote-init \
 xz \
 ti-ipc \
-env-init \
 firmwares \
+env-init \
+auto-flasher-emmc \
 "
 EXTRA_IMAGE_FEATURES ?= " allow-empty-password empty-root-password allow-root-login"
 
