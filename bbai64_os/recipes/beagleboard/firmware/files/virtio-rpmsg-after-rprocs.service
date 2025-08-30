@@ -1,0 +1,24 @@
+[Unit]
+Description=Load virtio_rpmsg_bus after remoteprocs are running
+After=remoteproc@5c00000.r5f.service remoteproc@5e00000.r5f.service remoteproc@4d80800000.dsp.service remoteproc@4d81800000.dsp.service remoteproc@64800000.dsp.service
+Wants=remoteproc@5c00000.r5f.service remoteproc@5e00000.r5f.service remoteproc@4d80800000.dsp.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Wait until all present remoteprocs report "running"
+ExecStart=/bin/sh -c '\
+  ok=1; \
+  for rp in /sys/class/remoteproc/remoteproc*; do \
+    [ -e "$$rp/state" ] || continue; \
+    for i in $$(seq 1 30); do \
+      state=$$(cat "$$rp/state" 2>/dev/null || echo ""); \
+      [ "$$state" = "running" ] && break; \
+      sleep 0.2; \
+    done; \
+    [ "$$(cat $$rp/state 2>/dev/null)" = "running" ] || ok=0; \
+  done; \
+  [ $$ok -eq 1 ] && exec /sbin/modprobe virtio_rpmsg_bus || { echo "remoteproc not running; skip rpmsg"; exit 1; }'
+
+[Install]
+WantedBy=multi-user.target

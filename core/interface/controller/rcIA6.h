@@ -1,17 +1,18 @@
 #ifndef DFC_RC_H
 #define DFC_RC_H
 
-extern "C" {
-#include <ti/csl/soc.h>
 #include <cstdint>
-}
-
 #include <cmath>
 #include <algorithm>
+
+extern "C" {
+#include <ti/csl/cslr_ecap.h>
+#include <ti/csl/cslr.h>
+#include <ti/csl/soc.h>
+}
+
 #include <dfc_types.h>
 #include <utils.h>
-
-struct CSL_ecapRegs;
 
 namespace rc {
 
@@ -51,8 +52,8 @@ private:
   }
 
   static sint32 preInit(uint16 id);
-  static void initCaptureEvents(volatile CSL_ecapRegs *ecap);
-  static bool read(volatile CSL_ecapRegs *ecap, uint32 &cap1, uint32 &cap2);
+  static void initCaptureEvents(volatile CSL_EcapRegs *ecap);
+  static bool read(volatile CSL_EcapRegs *ecap, uint32 &cap1, uint32 &cap2);
 
   DFC_t_RcParams m_Params{};
   DFC_t_RcInputs m_Data{};

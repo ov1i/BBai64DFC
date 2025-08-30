@@ -8,20 +8,17 @@
 };
 
 
-&reserved-memory {
-    rtos_ipc_memory_region: memories@aa000000 {
-        reg = <0x0 0xaa000000 0x0 0x01000000>;  /* 16 MiB */
-        alignment = <0x1000>;
-		no-map;
-    };
+// &{/reserved-memory} {
+// 	ipc_mem@aa000000 {
+// 		reg = <0x0 0xaa000000 0x0 0x01000000>;  /* 16 MiB */
+// 		no-map;
+// 	};
 
-	vision_tele_memory_region: vision_tele_memory_region@ab000000 {
-        reg = <0x00 0xab000000 0x00 0x00800000>; /* 8 MiB */
-        alignment = <0x1000>;
-        no-map;
-    };
-};
-
+// 	vision-tele@ab000000 {
+// 		reg = <0x0 0xab000000 0x0 0x00800000>;  /* 8 MiB */
+// 		no-map;
+// 	};
+// };
 
 &main_sdhci1 {
     sdhci-caps-mask = <0x07 0x0>;
@@ -39,9 +36,37 @@
 	status = "disabled";
 };
 
-&main_uart0 {
+&main_r5fss1 {
+    /* 1 = lockstep, 0 = split */
 	status = "disabled";
+    ti,cluster-mode = <1>;
 };
+
+/* disable only the entry core in lockstep */
+&main_r5fss1_core0 {
+    status = "disabled";
+    firmware-name = "";
+};
+
+/* Core1 is unused in lockstep but we disable it just in case */
+&main_r5fss1_core1 {
+    status = "disabled";
+    firmware-name = "";
+};
+
+&c66_1 {
+	status = "disabled";
+	firmware-name = "";
+};
+
+&c71_0 {
+	status = "disabled";
+	firmware-name = "";
+};
+
+// &main_uart0 {
+// 	status = "disabled";
+// };
 
 &main_r5fss0 {
     ti,cluster-mode = <1>;	// lockstep

@@ -1,6 +1,11 @@
 #include "controller/PIDController.h"
 #include "pwm/PWMgen.h"
 
+extern "C" {
+#include <FreeRTOS.h>
+}
+
+#include <algorithm>
 
 namespace ctrl {
 
@@ -14,7 +19,7 @@ float64 C_PIDController::apply_deadband_expo(float64 v, float64 deadband, float6
   if (std::fabs(v) < deadband) return 0.0;
   // rescale after DB so  (deadband..1) -> (0..1)
   float64 s = (std::fabs(v) - deadband) / (1.0 - deadband);
-  s = std::clamp(s, 0.0, 1.0);
+  s = constrain(s, 0.0, 1.0);
   // expo (smooth around center)
   float64 s_ex = (1.0 - expo) * s + expo * s * s * s;
   return (v >= 0 ? s_ex : -s_ex);
@@ -35,11 +40,11 @@ void C_PIDController::quat_to_euler312(const float64 q[4], float64& yaw, float64
   const float64 w=q[0], x=q[1], y=q[2], z=q[3];
   // standard DCM
   float64 R00 = w*w + x*x - y*y - z*z;
-  float64 R01 = 2*(x*y - w*z);
-  float64 R02 = 2*(x*z + w*y);
+  // float64 R01 = 2*(x*y - w*z);
+  // float64 R02 = 2*(x*z + w*y);
   float64 R10 = 2*(x*y + w*z);
-  float64 R11 = w*w - x*x + y*y - z*z;
-  float64 R12 = 2*(y*z - w*x);
+  // float64 R11 = w*w - x*x + y*y - z*z;
+  // float64 R12 = 2*(y*z - w*x);
   float64 R20 = 2*(x*z - w*y);
   float64 R21 = 2*(y*z + w*x);
   float64 R22 = w*w - x*x - y*y + z*z;
@@ -54,7 +59,7 @@ void C_PIDController::quat_to_euler312(const float64 q[4], float64& yaw, float64
 
 void C_PIDController::quat_to_axis_angle(const float64 q[4], float64 axis[3], float64& angle) {
   // assumes q normalized
-  angle = (float64)(2.0 * std::acos(std::clamp(q[0], -1.0, 1.0)));
+  angle = (float64)(2.0 * std::acos(constrain(q[0], -1.0, 1.0)));
   float64 s = std::sqrt(std::max(1.0 - q[0]*q[0], 1e-12));
   axis[0] = (float64)(q[1] / s);
   axis[1] = (float64)(q[2] / s);
@@ -170,8 +175,8 @@ void C_PIDController::position_hold_xy(const DFC_t_EKF_State& ekfState, const DF
   float64 eE = (float64)(m_State.pos_sp_NED[1] - ekfState.p[1]);
 
   // Outer m_Params + I -> velocity setpoint
-  m_State.vel_sp_NED[0] = std::clamp(m_Params.kp_pos_xy * eN + m_State.i_vel_xy[0], -m_Params.max_vel_xy, m_Params.max_vel_xy);
-  m_State.vel_sp_NED[1] = std::clamp(m_Params.kp_pos_xy * eE + m_State.i_vel_xy[1], -m_Params.max_vel_xy, m_Params.max_vel_xy);
+  m_State.vel_sp_NED[0] = constrain(m_Params.kp_pos_xy * eN + m_State.i_vel_xy[0], -m_Params.max_vel_xy, m_Params.max_vel_xy);
+  m_State.vel_sp_NED[1] = constrain(m_Params.kp_pos_xy * eE + m_State.i_vel_xy[1], -m_Params.max_vel_xy, m_Params.max_vel_xy);
 
   // Integrate only when not saturated
   if (!m_State.motors_saturated) {
@@ -251,7 +256,7 @@ void C_PIDController::altitude_hold(const DFC_t_EKF_State& ekfState, const DFC_t
 
   // Position m_Params+I to make a vel_sp_z
   float64 ez = (float64)(m_State.pos_sp_NED[2] - ekfState.p[2]); // positive if we are above target? (NED down)
-  float64 vel_sp_z = std::clamp(m_Params.kp_pos_z * ez + m_State.i_vel_z, -m_Params.max_vel_z_up, m_Params.max_vel_z_down);
+  float64 vel_sp_z = constrain(m_Params.kp_pos_z * ez + m_State.i_vel_z, -m_Params.max_vel_z_up, m_Params.max_vel_z_down);
   // override by stick climb if out of deadband
   if (std::fabs(climb_rate_sp) > 1e-3) vel_sp_z = climb_rate_sp;
 

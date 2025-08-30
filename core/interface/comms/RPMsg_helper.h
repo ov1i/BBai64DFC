@@ -1,11 +1,12 @@
 #ifndef DFC_RPMSG_HELPER_H
 #define DFC_RPMSG_HELPER_H
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+
 extern "C" {
 #include <ti/drv/ipc/ipc.h>
-#include <cstdint>
-#include <cstddef>
-#include <cstring>
 }
 #include <utils.h>
 #include <data_types.h>

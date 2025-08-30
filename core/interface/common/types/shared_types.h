@@ -9,17 +9,17 @@ extern "C" {
 
 #include <stdint.h>
 
-const uint32 DFC_FLOW_RAW_MAGIC = 0x4F464C4FU; // sanity check via magic no.
-const uint32 DFC_TELE_MAGIC =     0x54454C45U; // sanity check via magic no.
-const uint32 width = 640u;
-const uint32 height = 480u;
-const uint64 baseAddr = 0xAB000000ull;
+#define DFC_FLOW_RAW_MAGIC            ((uint32)0x4F464C4FU) // sanity check via magic no.
+#define DFC_TELE_MAGIC                ((uint32)0x54454C45U) // sanity check via magic no.
+#define DFC_CALI_MAGIC                ((uint32)0x43414C49u) // sanity check via magic no.
+#define IMG_W                         ((uint32)640u)
+#define IMG_H                         ((uint32)480u)
+#define baseAddr                      ((uint64)0xAB000000ull)
+#define A72_procID                    ((uint16)0U)
+#define R5F_procID                    ((uint16)3U) // MAIN Island pointing to the first half but will be the full MCU2 since we in lockstep
+#define C66_procID                    ((uint16)7U)
+#define IMREADY                       ((uint8)1U)
 
-enum { 
-  IMREADY    = 1, 
-  IMREQUEST  = 2, 
-  IMCONSUMED = 3,
-};
 enum { 
   IMPREV = 0,
   IMCURR = 1, 
@@ -112,15 +112,20 @@ typedef struct {
   float64 u_px_per_s;
   float64 v_px_per_s;
   float64 quality;    // 0..1 inliers
-  bool valid;
+  uint8 valid;
 } DFC_t_OFlow_Output;
 
-// WE KEEP THEM HERE In order to prevent usesless includes, will act as duplicates but same values
-struct DFC_t_ProcIDs {
-  static constexpr uint16 A72  = 0U;
-  static constexpr uint16 R5F  = 3U; // MAIN Island pointing to the first half but will be the full MCU2 since we in lockstep
-  static constexpr uint16 C66  = 7U;  
-};
+typedef struct {
+  float32 ax, ay, az;
+  float32 mx, my, mz;
+} DFC_t_CalibSample;
+
+typedef struct {
+  uint32 magic;
+  uint16 seq;       // chunk id
+  uint16 count;     // number of valid samples in this chunk
+  DFC_t_CalibSample payload[16]; // small chunk to keep RPMsg payload comfy
+} DFC_t_CalibChunk;
 
 static inline uint32 getImgDataSize(uint32 w, uint32 h) { return w*h; }
 static inline uint64 getImgePortSize(uint32 w, uint32 h) { return sizeof(DFC_t_ImageHeader) + getImgDataSize(w,h); }
@@ -130,4 +135,3 @@ static inline uint64 getMemAddr(uint8 idx, uint32 w, uint32 h) { return baseAddr
 }
 #endif
 #endif
-

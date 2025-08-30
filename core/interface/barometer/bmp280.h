@@ -44,7 +44,7 @@ public:
 
 private:
   bool updateInternalCalibReg();
-  void internalValCompensation();
+  void internalValCompensation(sint32 rawTempData, sint32 rawPressureData);
   void computeAltitude();
 
   DFC_t_BMP280_Data m_data;

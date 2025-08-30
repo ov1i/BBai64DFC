@@ -7,8 +7,8 @@ extern "C" {
 #include <ti/csl/hw_types.h>
 #include <ti/csl/soc.h>
 #include <ti/drv/sciclient/sciclient.h>
-#include <ti/drv/uart/UART.h>
-#include <ti/drv/uart/UART_stdio.h>
+#include <ti/osal/TaskP.h>
+
 }
 
 namespace i2c {
@@ -16,21 +16,19 @@ bool C_I2C::startModule(uint32 id) {
   Sciclient_ConfigPrms_t config; 
   Sciclient_configPrmsInit(&config);
   sint32 status = Sciclient_init(&config);
-  if (status && status != SCICLIENT_EALREADY_OPEN) return false;
+  if (status && status != CSL_PASS) return false;
   
-  struct tisci_msg_set_device_req  req  = { 0 };
-  struct tisci_msg_set_device_resp resp = { 0 };
+  struct tisci_msg_set_device_req  req  = {};
+  struct tisci_msg_set_device_resp resp = {} ;
 
   Sciclient_ReqPrm_t reqParam  = { 0 };
   Sciclient_RespPrm_t respParam = { 0 };
 
   req.id         = id;
   req.state      = TISCI_MSG_VALUE_DEVICE_SW_STATE_ON;
-  req.hdr.type   = TISCI_MSG_SET_DEVICE;
-  req.hdr.host   = TISCI_HOST_ID_MAIN_0;
   req.hdr.flags  = TISCI_MSG_FLAG_AOP;
 
-  reqParam.messageType    = TISCI_MSG_SET_DEVICE_STATE;
+  reqParam.messageType    = TISCI_MSG_SET_DEVICE;
   reqParam.pReqPayload    = (const uint8*)&req;
   reqParam.reqPayloadSize = (uint32)sizeof(req);
   reqParam.timeout        = SCICLIENT_SERVICE_WAIT_FOREVER;
@@ -41,7 +39,7 @@ bool C_I2C::startModule(uint32 id) {
   status = Sciclient_service(&reqParam, &respParam);
   if (status != CSL_PASS) return false;
 
-  if ((sresp.flags & TISCI_MSG_FLAG_ACK) != TISCI_MSG_FLAG_ACK) {
+  if ((respParam.flags & TISCI_MSG_FLAG_ACK) != TISCI_MSG_FLAG_ACK) {
     return false;
   }
 
@@ -49,9 +47,11 @@ bool C_I2C::startModule(uint32 id) {
 }
 
 bool C_I2C::preinit(uint32 instance) {
-  uint32 baseAddr;
   I2C_HwAttrs i2cCfg;
+  Board_STATUS boardStatus = BOARD_SOK;
   sint32 retVal = CSL_SOK;
+  uint32 baseAddr;
+  uint32 muxData;
 
   switch (instance) {
   case 0:
@@ -73,17 +73,17 @@ bool C_I2C::preinit(uint32 instance) {
     muxData = 0x64002;
     boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG120), muxData);
     if(boardStatus == BOARD_SOK) {
-      UART_printf("Y5 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+        DebugP_log0("Y5 pin succesfully set in i2c mode!\r\n");
     } else {
-      UART_printf("Y5 pin i2c mode switch failed..\r\n");
+        DebugP_log0("Y5 pin i2c mode switch failed..\r\n");
       return false;
     }
     /// Y1 - pin
     boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG119), muxData);
     if(boardStatus == BOARD_SOK) {
-      UART_printf("Y1 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+        DebugP_log0("Y1 pin succesfully set in i2c mode!\r\n");
     } else {
-      UART_printf("Y1 pin i2c mode switch failed..\r\n");
+        DebugP_log0("Y1 pin i2c mode switch failed..\r\n");
       return false;
     }
     break;
@@ -97,17 +97,17 @@ bool C_I2C::preinit(uint32 instance) {
     muxData = 0x64002;
     boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG116), muxData);
     if(boardStatus == BOARD_SOK) {
-      UART_printf("AA3 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+        DebugP_log0("AA3 pin succesfully set in i2c mode!\r\n");
     } else {
-      UART_printf("AA3 pin i2c mode switch failed..\r\n");
+        DebugP_log0("AA3 pin i2c mode switch failed..\r\n");
       return false;
     }
     /// Y2 - pin
     boardStatus = Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG121), muxData);
     if(boardStatus == BOARD_SOK) {
-      UART_printf("Y2 pin succesfully set in i2c mode (settings: %X)!\r\n", muxData);
+        DebugP_log0("Y2 pin succesfully set in i2c mode!\r\n");
     } else {
-      UART_printf("Y2 pin i2c mode switch failed..\r\n");
+        DebugP_log0("Y2 pin i2c mode switch failed..\r\n");
       return false;
     }
     break;
@@ -140,8 +140,7 @@ bool C_I2C::init(uint32 instance, I2C_BitRate bitRate) {
   I2C_Params i2cParams;
 
   if (instance >= I2C_HWIP_MAX_CNT) {
-    UART_printf("I2C init error: instance %u out of range (max %u)\n", instance,
-                I2C_HWIP_MAX_CNT - 1);
+      DebugP_log0("I2C init error: instance out of range \n");
     return false;
   }
 
@@ -153,8 +152,7 @@ bool C_I2C::init(uint32 instance, I2C_BitRate bitRate) {
 
   m_handler = I2C_open(instance, &i2cParams);
   if (m_handler == NULL) {
-    UART_printf("I2C init error: I2C_open() failed for instance %u\n",
-                instance);
+      DebugP_log0("I2C init error: I2C_open() failed\n");
     return false;
   }
 
@@ -162,33 +160,30 @@ bool C_I2C::init(uint32 instance, I2C_BitRate bitRate) {
   //   TISCI_MSG_VALUE_DEVICE_SW_STATE_ON,
   //                              TISCI_MSG_FLAG_AOP,
   //                              SCICLIENT_SERVICE_WAIT_FOREVER);
-  //   UART_printf("Took owenership of i2c instance %u\n", instance);
+  //     DebugP_log0("Took owenership of i2c instance %u\n", instance);
 
   //   Sciclient_pmSetModuleRst(TISCI_DEV_I2C6, 1,
   //   SCICLIENT_SERVICE_WAIT_FOREVER); Sciclient_pmSetModuleRst(TISCI_DEV_I2C6,
-  //   0, SCICLIENT_SERVICE_WAIT_FOREVER); UART_printf("Reset performed on the
+  //   0, SCICLIENT_SERVICE_WAIT_FOREVER);   DebugP_log0("Reset performed on the
   //     i2c instance %u\n", instance);
 
-  UART_printf("\n\rProbing for %d is in progress...\r\n", instance);
+    DebugP_log0("\n\rProbing in progress...\r\n");
   for (uint16 slaveAddr = 0U; slaveAddr < 128U; slaveAddr++) {
-    if (I2C_STATUS_SUCCESS ==
-        I2C_control(m_handler, I2C_CMD_PROBE, &slaveAddr)) {
-      UART_printf("I2C%d: Passed for address 0x%x !!! \r\n", instance,
-                  slaveAddr);
+    if (I2C_STATUS_SUCCESS == I2C_control(m_handler, I2C_CMD_PROBE, &slaveAddr)) {
+        DebugP_log0("I2C inst passed for local addr!!! \r\n");
     } else {
-      UART_printf("I2C%d: Failed for address 0x%x !!! \r\n", instance,
-                  slaveAddr);
+        DebugP_log0("I2C inst failed for local addr!!! \r\n");
     }
   }
 
-  UART_printf("I2C instance %u initialized successfully\n", instance);
+    DebugP_log0("I2C instance initialized successfully\n");
 
   return true;
 }
 
 bool C_I2C::writeRegSingletVal(uint8 dev_addr, const uint8 *reg_n_data) {
   if (!m_handler || !reg_n_data) {
-    UART_printf("writeRegSingletVal: Invalid arguments\n");
+      DebugP_log0("writeRegSingletVal: Invalid arguments\n");
     return false;
   }
 
@@ -204,10 +199,8 @@ bool C_I2C::writeRegSingletVal(uint8 dev_addr, const uint8 *reg_n_data) {
 
   sint16 errCode = I2C_transfer(m_handler, &i2cTrans);
   if (errCode != I2C_STS_SUCCESS) {
-    UART_printf("writeRegSingletVal: I2C_transfer failed (dev 0x%02X)\n",
-                dev_addr);
-    UART_printf("writeRegSingletVal: I2C_transfer error code -> %d \r\n",
-                errCode);
+      DebugP_log0("writeRegSingletVal: I2C_transfer failed\n");
+      DebugP_log0("writeRegSingletVal: I2C_transfer error\r\n");
     return false;
   }
 
@@ -229,7 +222,7 @@ bool C_I2C::writeRegSingletVal(uint8 dev_addr, const uint8 *reg_n_data) {
 
 //   status = I2C_transfer(m_handler, &transaction);
 //   if (status != I2C_STS_SUCCESS) {
-//     UART_printf(
+//       DebugP_log0(
 //         "Failing while transmitting the rd reg addr with error code - %d\n",
 //         status);
 //     return false;
@@ -242,7 +235,7 @@ bool C_I2C::writeRegSingletVal(uint8 dev_addr, const uint8 *reg_n_data) {
 
 //   status = I2C_transfer(m_handler, &transaction);
 //   if (status != I2C_STS_SUCCESS) {
-//     UART_printf("Failing while reading the register data by returning - %d\n",
+//       DebugP_log0("Failing while reading the register data by returning - %d\n",
 //                 status);
 //     return false;
 //   }
@@ -253,7 +246,7 @@ bool C_I2C::writeRegSingletVal(uint8 dev_addr, const uint8 *reg_n_data) {
 bool C_I2C::rw(uint8 dev_addr, const uint8 *wbuffer, size_t wsize,
                uint8 *rbuffer, size_t rsize) {
   if (!wbuffer || wsize == 0 || rsize == 0) {
-    UART_printf("rw: Invalid arguments\n");
+      DebugP_log0("rw: Invalid arguments\n");
     return false;
   }
 
@@ -269,7 +262,7 @@ bool C_I2C::rw(uint8 dev_addr, const uint8 *wbuffer, size_t wsize,
   
   bool success = I2C_transfer(m_handler, &i2cTrans);
   if (!success) {
-    UART_printf("i2cWriteRead: I2C_transfer failed (dev 0x%02X)\n", dev_addr);
+      DebugP_log0("i2cWriteRead: I2C_transfer failed\n");
   }
   return success;
 }

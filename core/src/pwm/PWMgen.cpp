@@ -1,13 +1,22 @@
 #include "pwm/PWMgen.h"
 
 extern "C" {
+#include <FreeRTOS.h>
+#include <task.h>
+#include <queue.h>
+#include <timers.h>
 #include <ti/drv/sciclient/sciclient.h>
-#include <ti/drv/sciclient/include/tisci/tisci_devices.h>
-
 #include <ti/csl/soc.h>
+#include <ti/csl/cslr.h>
+#include <ti/csl/csl.h>
+#include <ti/csl/cslr_epwm.h>
 #include <ti/board/board.h>
-#include <ti/board/src/board_internal.h>
+#include <ti/board/board_cfg.h>
+#include <ti/osal/TaskP.h>
+
 }
+
+#include <cmath>
 
 namespace PWMgen {
 
@@ -23,25 +32,23 @@ static uint16 g_clkdiv = 0;      // TBCTL.CLKDIV
 static uint16 g_hspdiv = 0;      // TBCTL.HSPCLKDIV
 static float64 g_counts_per_us = 0.0; // to convert us to counts
 
-static sint32 preInit(uint32 id) {
+sint32 preInit(uint32 id) {
   Sciclient_ConfigPrms_t config; 
   Sciclient_configPrmsInit(&config);
   sint32 status = Sciclient_init(&config);
-  if (status && status != SCICLIENT_EALREADY_OPEN) return status;
+  if(status && status != CSL_PASS) return status;
   
-  struct tisci_msg_set_device_req  req  = { 0 };
-  struct tisci_msg_set_device_resp resp = { 0 };
+  struct tisci_msg_set_device_req  req  = {};
+  struct tisci_msg_set_device_resp resp = {};
 
   Sciclient_ReqPrm_t reqParam  = { 0 };
   Sciclient_RespPrm_t respParam = { 0 };
 
   req.id         = id;
   req.state      = TISCI_MSG_VALUE_DEVICE_SW_STATE_ON;
-  req.hdr.type   = TISCI_MSG_SET_DEVICE;
-  req.hdr.host   = TISCI_HOST_ID_MAIN_0;
   req.hdr.flags  = TISCI_MSG_FLAG_AOP;
 
-  reqParam.messageType    = TISCI_MSG_SET_DEVICE_STATE;
+  reqParam.messageType    = TISCI_MSG_SET_DEVICE;
   reqParam.pReqPayload    = (const uint8*)&req;
   reqParam.reqPayloadSize = (uint32)sizeof(req);
   reqParam.timeout        = SCICLIENT_SERVICE_WAIT_FOREVER;
@@ -52,14 +59,14 @@ static sint32 preInit(uint32 id) {
   status = Sciclient_service(&reqParam, &respParam);
   if (status != CSL_PASS) return status;
 
-  if ((sresp.flags & TISCI_MSG_FLAG_ACK) != TISCI_MSG_FLAG_ACK) {
+  if ((respParam.flags & TISCI_MSG_FLAG_ACK) != TISCI_MSG_FLAG_ACK) {
     return CSL_EFAIL;
   }
   
   return CSL_PASS;
 }
 
-static void setupDividersPeriod(float64 tbclk_hz, uint32 freq_hz, uint16& clkdiv, uint16& hspdiv, uint16& tbprd, float64& counts_per_us) {
+void setupDividersPeriod(float64 clk_hz, uint32 freq_hz, uint16& clkdiv, uint16& hspdiv, uint16& tbprd, float64& counts_per_us) {
   // ePWM has two dividers that are encoded in "code" here are the actual vals: CLKDIV -> 1,2,4,8 and HSPCLKDIV -> 1,2,4,6,8,10,12,14
   const uint16 clkdiv_true_vals[4]   = {1,2,4,8};
   const uint16 hspdiv_true_vals[8]   = {1,2,4,6,8,10,12,14};
@@ -70,8 +77,8 @@ static void setupDividersPeriod(float64 tbclk_hz, uint32 freq_hz, uint16& clkdiv
   const float64 period_s = 1.0 / (float64)freq_hz;
   for (uint8 i=0;i<4;i++) {
     for (uint8 j=0;j<8;j++) {
-      float64 tbclk = tbclk_hz / (clkdiv_true_vals[i] * hspdiv_true_vals[j]);
-      float64 counts_per_prd   = tbclk * period_s;
+      float64 clk = clk_hz / (clkdiv_true_vals[i] * hspdiv_true_vals[j]);
+      float64 counts_per_prd   = clk * period_s;
       if (counts_per_prd > 65535.0) continue;           // won’t fit :O
       if (counts_per_prd < 100.0)  continue;            // too small  -_-
       // I guess in between is perfect 0_0
@@ -87,8 +94,8 @@ static void setupDividersPeriod(float64 tbclk_hz, uint32 freq_hz, uint16& clkdiv
   if (best_tbprd == 0) {
     // Fallback: force max period with largest divider
     best_clkdiv = 8; best_hspdiv = 14;
-    float64 tbclk = tbclk_hz / (best_clkdiv * best_hspdiv);
-    best_tbprd = (uint16)std::min(65535.0, tbclk * period_s);
+    float64 clk = clk_hz / (best_clkdiv * best_hspdiv);
+    best_tbprd = (uint16)std::fmin(65535.0, clk * period_s);
   }
 
   switch (best_clkdiv) { 
@@ -136,11 +143,11 @@ static void setupDividersPeriod(float64 tbclk_hz, uint32 freq_hz, uint16& clkdiv
   //NICE MATH G
 
   tbprd = best_tbprd;
-  float64 tbclk = tbclk_hz / (float64)(best_clkdiv * best_hspdiv);
-  counts_per_us = tbclk / 1e6;
+  float64 clk = clk_hz / (float64)(best_clkdiv * best_hspdiv);
+  counts_per_us = clk / 1e6;
 }
 
-static void setupEPWM(volatile CSL_epwmRegs* pwm) {
+void setupEPWM(volatile CSL_epwmRegs* pwm) {
   uint16 tbctl = 0;
   tbctl |= (0 << CSL_EPWM_TBCTL_CTRMODE_SHIFT);  // up-count
   tbctl |= (g_hspdiv << CSL_EPWM_TBCTL_HSPCLKDIV_SHIFT);
@@ -150,7 +157,14 @@ static void setupEPWM(volatile CSL_epwmRegs* pwm) {
 
   pwm->TBPRD  = g_tbprd;    // period
   pwm->TBPHS  = 0;          // no phase
-  pwm->TBCTR  = 0;
+
+  uint16 cmpctl = 0;
+  // shadowing enable, loading will occur when we hit CTR=ZERO
+  cmpctl |= (0u << CSL_EPWM_CMPCTL_SHDWAMODE_SHIFT);  // 0 => SHADOW
+  cmpctl |= (0u << CSL_EPWM_CMPCTL_LOADAMODE_SHIFT);  // 0 => load on ZRO
+  cmpctl |= (0u << CSL_EPWM_CMPCTL_SHDWBMODE_SHIFT);  // OTHER HALF WILL BE THE SAME INSTR
+  cmpctl |= (0u << CSL_EPWM_CMPCTL_LOADBMODE_SHIFT);
+  pwm->CMPCTL = cmpctl;
 
   // UP AND DOWN we go.. driving UP and DOWN the pins
   pwm->AQCTLA = ( (2 << CSL_EPWM_AQCTLA_ZRO_SHIFT) | (1 << CSL_EPWM_AQCTLA_CAU_SHIFT) );
@@ -161,36 +175,40 @@ static void setupEPWM(volatile CSL_epwmRegs* pwm) {
   if (minLvl_counts > g_tbprd) minLvl_counts = g_tbprd;
   pwm->CMPA = minLvl_counts;
   pwm->CMPB = minLvl_counts;
+
+  // we make sure this are not interfering 
+  pwm->TZFRC = 0; 
+  pwm->TZCLR = 0xFFFF;
 }
 
-static bool init(const DFC_t_PWMgen_Params& params) {
+bool init(const DFC_t_PWMgen_Params& params) {
   g_params = params;
   
-  uint32 muxData = 0x10006h;
+  uint32 muxData = 0x10006u;
   if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG89), muxData) == BOARD_SOK) {
-    UART_printf("V29 pin succesfully set in EHRPWM output mode (settings: %X)!\r\n", muxData);
+      DebugP_log0("V29 pin succesfully set in EHRPWM output mode!\r\n");
   } else {
-    UART_printf("V29 pin EHRPWM output mode switch failed..\r\n");
+      DebugP_log0("V29 pin EHRPWM output mode switch failed..\r\n");
     return false;
   }
   if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG90), muxData) == BOARD_SOK) {
-    UART_printf("V27 pin succesfully set in ECAP input mode (settings: %X)!\r\n", muxData);
+      DebugP_log0("V27 pin succesfully set in ECAP input mode!\r\n");
   } else {
-    UART_printf("V27 pin EHRPWM output mode switch failed..\r\n");
+      DebugP_log0("V27 pin EHRPWM output mode switch failed..\r\n");
     return false;
   }
 
   if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG94), muxData) == BOARD_SOK) {
-    UART_printf("U27 pin succesfully set in EHRPWM output mode (settings: %X)!\r\n", muxData);
+      DebugP_log0("U27 pin succesfully set in EHRPWM output mode!\r\n");
   } else {
-    UART_printf("U27 pin EHRPWM output mode switch failed..\r\n");
+      DebugP_log0("U27 pin EHRPWM output mode switch failed..\r\n");
     return false;
   }
 
   if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG95), muxData) == BOARD_SOK) {
-    UART_printf("U24 pin succesfully set in EHRPWM output mode (settings: %X)!\r\n", muxData);
+      DebugP_log0("U24 pin succesfully set in EHRPWM output mode!\r\n");
   } else {
-    UART_printf("U24 pin EHRPWM output mode switch failed..\r\n");
+      DebugP_log0("U24 pin EHRPWM output mode switch failed..\r\n");
     return false;
   }
 
@@ -199,7 +217,7 @@ static bool init(const DFC_t_PWMgen_Params& params) {
   if (preInit(TISCI_DEV_EHRPWM2) != 0) return false;
 
   // Precompute dividers/period
-  setupDividersPeriod(g_params.tbclk_hz, g_params.freq_hz, g_clkdiv, g_hspdiv, g_tbprd, g_counts_per_us);
+  setupDividersPeriod(g_params.clk_hz, g_params.freq_hz, g_clkdiv, g_hspdiv, g_tbprd, g_counts_per_us);
 
   // Prepare base pointers
   volatile CSL_epwmRegs* pPWMInst0 = (volatile CSL_epwmRegs*)CSL_EHRPWM0_EPWM_BASE;
@@ -218,7 +236,7 @@ static bool init(const DFC_t_PWMgen_Params& params) {
   return true;
 }
 
-static inline uint16 us_to_counts(uint32 us) {
+inline uint16 us_to_counts(uint32 us) {
   if (us == 0) return 0;
 
   float64 c = g_counts_per_us * (float64)us;
@@ -229,7 +247,61 @@ static inline uint16 us_to_counts(uint32 us) {
   return (uint16)(c + 0.5);
 }
 
-static void write_motor_us(uint8 ch, uint32 usec) {
+void calibrateESC(uint32 maxDelay_ms, uint32 minDelay_ms) {
+  write_motor_us(0, g_params.max_us);
+  write_motor_us(1, g_params.max_us);
+  write_motor_us(2, g_params.max_us);
+  write_motor_us(3, g_params.max_us);
+  vTaskDelay(pdMS_TO_TICKS(maxDelay_ms));
+  
+  write_motor_us(0, g_params.min_us);
+  write_motor_us(1, g_params.min_us);
+  write_motor_us(2, g_params.min_us);
+  write_motor_us(3, g_params.min_us);
+  vTaskDelay(pdMS_TO_TICKS(minDelay_ms));
+}
+
+bool detectESCCalibrationGesture(rc::C_RcIA6& rc, uint32 window_ms, uint32 gestureDuration_ms) {
+  const uint32 gestureCaptureEnd = now_ms() + window_ms;
+  uint32 currentHold_ms = 0;
+
+  while (now_ms() < gestureCaptureEnd) {
+    rc.update();
+    const DFC_t_RcInputs rcData = rc.getData();
+    const bool gesture = (rcData.thr > 0.80);
+
+    if (gesture) {
+      currentHold_ms += 10;
+      if (currentHold_ms >= gestureDuration_ms) return true;
+    } else {
+      currentHold_ms = 0;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  return false;
+}
+
+bool detectFULLCalibrationGesture(rc::C_RcIA6& rc, uint32 window_ms, uint32 gestureDuration_ms) {
+  const uint32 gestureCaptureEnd = now_ms() + window_ms;
+  uint32 currentHold_ms = 0;
+
+  while (now_ms() < gestureCaptureEnd) {
+    rc.update();
+    const DFC_t_RcInputs rcData = rc.getData();
+    const bool gesture = (rcData.thr >= 0.8 ) && (rcData.pitch >= 0.8);
+
+    if (gesture) {
+      currentHold_ms += 10;
+      if (currentHold_ms >= gestureDuration_ms) return true;
+    } else {
+      currentHold_ms = 0;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  return false;
+}
+
+void write_motor_us(uint8 ch, uint32 usec) {
   if (ch > 3) return;
 
   if (usec != 0) {
@@ -248,9 +320,8 @@ static void write_motor_us(uint8 ch, uint32 usec) {
   }
 }
 
-static void outputWrapper(uint32 m0, uint32 m1, uint32 m2, uint32 m3) {
+void outputWrapper(uint32 m0, uint32 m1, uint32 m2, uint32 m3) {
   write_motor_us(0, m0); write_motor_us(1, m1); write_motor_us(2, m2); write_motor_us(3, m3);
 }
 
-
-} // namespace motor_pwm
+} // namespace PWMgen

@@ -7,7 +7,10 @@
 
 struct my_resource_table {
     struct resource_table_base base;
-    uint32 offset[2];
+    uint32 offset[3];  /* we now have 3 resources */
+
+    /* trace buffer */
+    struct fw_rsc_trace        trace;
 
     /* vdev: virtio-rpmsg, with two vrings */
     struct fw_rsc_vdev        vdev_rpmsg;

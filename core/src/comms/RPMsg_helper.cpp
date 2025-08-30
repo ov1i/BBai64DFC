@@ -1,6 +1,16 @@
-#include "comms/rpmsg_helper.hpp"
-#include <cstdlib>
+#include "comms/RPMsg_helper.h"
+
+#include <cstddef>
+
+extern "C" {
+#include <cstdint>
+#include <ti/drv/ipc/ipc.h>
 #include <cstring>
+}
+
+#include <dfc_types.h>
+#include <shared_types.h>
+#include <utils.h>
 
 namespace rpmsg {
 
@@ -12,7 +22,7 @@ bool& C_RPMsgHelper::isInited() {
 void C_RPMsgHelper::init() {
   if (isInited()) return;
   Ipc_InitPrms params;
-  Ipc_initPrms_init(&params);
+  IpcInitPrms_init(0, &params);
   Ipc_init(&params);
   isInited() = true;
 }
@@ -22,8 +32,8 @@ bool C_RPMsgHelper::open(uint16 remote_proc, const char* local_name, const char*
 
   m_remote_proc = remote_proc;
 
-  RPMessage_CreateParams params;
-  RPMessage_CreateParams_init(&params);
+  RPMessage_Params params;
+  RPMessage_init(&params);
 
   m_handler = RPMessage_create(&params, &m_local_endpt);
   if (!m_handler) return false;
@@ -35,7 +45,7 @@ bool C_RPMsgHelper::open(uint16 remote_proc, const char* local_name, const char*
   if (remote_name && remote_name[0]) {
     std::strncpy(m_remoteName, remote_name, sizeof(m_remoteName) - 1);
     uint32 tmpRENDP = 0xFFFFFFFFu;
-    uint32 tmpRPROC = INVALID_ENDPOINT;
+    uint32 tmpRPROC = INVALID_REMOTEPROC;
 
     if (RPMessage_getRemoteEndPt(static_cast<uint32>(m_remote_proc), m_remoteName, &tmpRPROC, &tmpRENDP, 1000U) == IPC_SOK) {
       m_remote_proc  = static_cast<uint16>(tmpRPROC);
@@ -51,7 +61,7 @@ sint32 C_RPMsgHelper::tryResolve(uint32 timeout_us) {
   if (m_remoteName[0] == '\0') return -2;
 
   uint32 tmpRENDP = 0xFFFFFFFFu;
-  uint32 tmpRPROC = INVALID_ENDPOINT;
+  uint32 tmpRPROC = INVALID_REMOTEPROC;
   if (RPMessage_getRemoteEndPt(static_cast<uint32>(m_remote_proc), m_remoteName, &tmpRPROC, &tmpRENDP, timeout_us) == IPC_SOK) {
     m_remote_proc  = static_cast<uint16>(tmpRPROC);
     m_remote_endpt = tmpRENDP;
@@ -81,7 +91,7 @@ sint32 C_RPMsgHelper::recv(void* buffer, sint32 max_len, sint32 timeout_us) {
 
   uint16 len = static_cast<uint16>(max_len);
   uint32 tmpRENDP = 0xFFFFFFFFu;
-  uint32 tmpRPROC = INVALID_ENDPOINT;
+  uint32 tmpRPROC = INVALID_REMOTEPROC;
   uint32 timeout_period = (timeout_us < 0) ? 0xFFFFFFFFu : static_cast<uint32>(timeout_us);
 
   sint32 status = RPMessage_recv(m_handler, buffer, &len, &tmpRENDP, &tmpRPROC, timeout_period);

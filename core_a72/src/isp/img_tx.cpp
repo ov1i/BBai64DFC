@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <memory>
 #include <errno.h>
+#include <fcntl.h>
 
 #include "common/types/data_types.h"
 #include "common/types/shared_types.h"
@@ -130,7 +131,7 @@ int main(int argc, char** argv) {
     uint64 min_interval_ns = (max_fps > 0) ? (1000000000ull / (uint64)max_fps) : 0;
 
     printf("img_udp_tx: %ux%u → %s:%d, %u chunks/frame, max_fps=%d\n",
-           (unsigned)width, (unsigned)height, host_ip, port,
+           (unsigned)IMG_W, (unsigned)IMG_H, host_ip, port,
            (unsigned)chunk_count, max_fps);
 
     for (;;) {
@@ -160,8 +161,8 @@ int main(int argc, char** argv) {
             udpHeader.magic = 0x31474D49u;
             udpHeader.frame_id = frame_id;
             udpHeader.ts_ns = hh.ts_ns;
-            udpHeader.width = width;
-            udpHeader.height = height;
+            udpHeader.width = IMG_W;
+            udpHeader.height = IMG_H;
             udpHeader.idx = id;
             udpHeader.chunk_count = chunk_count;
 

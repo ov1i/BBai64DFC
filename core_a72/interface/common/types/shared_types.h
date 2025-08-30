@@ -6,18 +6,18 @@
 #include "data_types.h"
 
 
-static constexpr uint32 DFC_TELE_MAGIC = 0x54454C45u;
+#define DFC_TELE_MAGIC                  ((uint32)0x54454C45U)
+#define DFC_CALI_MAGIC                  ((uint32)0x43414C49u)
+#define IMG_W                           ((uint32)640u)
+#define IMG_H                           ((uint32)480u)
+#define FPS                             ((uint8)90U)
 
-static constexpr uint16  width  = 640U;
-static constexpr uint16  height = 480U;
-static constexpr uint8   fps    = 90U;
+#define baseAddr                        ((uint64)0xAB000000ull)
 
-static constexpr uint64  baseAddr = 0xAB000000ULL;
+#define kV4L2BufferCount                ((uint8)2U)
 
-static constexpr uint8   kV4L2BufferCount = 2U;
 enum : uint8 { SLOT_PREV = 0, SLOT_CURR = 1 };
-
-enum : uint8 { IMREADY = 1, IMREQUEST = 2 };
+enum : uint8 { IMREADY = 1 };
 
 typedef struct __attribute__((aligned(64))) {
     uint64  ts_ns;
@@ -49,54 +49,54 @@ typedef struct {
 
 struct __attribute__((packed)) DFC_t_TelemetryPacket {
   // Header
-  uint32 magic;     
-  uint16 size;
-  uint32 seq;
+  uint32        magic;     
+  uint16        size;
+  uint32        seq;
 
   // IMU / Mag (no timestamps)
-  float32    ax, ay, az, gx, gy, gz;
-  float32    mx, my, mz;
-  float32    mag_adjustment[3];
-  uint8  mag_rdy;
-  uint8  _pad_mag[7];
-  float32    imu_temp;
+  float32       ax, ay, az, gx, gy, gz;
+  float32       mx, my, mz;
+  float32       mag_adjustment[3];
+  uint8         mag_rdy;
+  uint8         _pad_mag[7];
+  float32       imu_temp;
 
   // BMP280 (no timestamps)
-  float32    baro_p_hPa;
-  float32    baro_alt_m;
-  float32    baro_temp_C;
+  float32       baro_p_hPa;
+  float32       baro_alt_m;
+  float32       baro_temp_C;
 
   // EKF nominal
-  float32    pN, pE, pD;
-  float32    vN, vE, vD;
-  float32    qw, qx, qy, qz;
-  float32    bgx, bgy, bgz;
-  float32    bax, bay, baz;
+  float32       pN, pE, pD;
+  float32       vN, vE, vD;
+  float32       qw, qx, qy, qz;
+  float32       bgx, bgy, bgz;
+  float32       bax, bay, baz;
 
   // EKF covariance (diagonal only)
-  float32    Pdiag[15];
+  float32       Pdiag[15];
 
   // RC
-  float32    thr, roll, pitch, yaw;
-  uint8  arm;
-  uint8  mode;
-  uint8  _pad_rc[6];
+  float32       thr, roll, pitch, yaw;
+  uint8         arm;
+  uint8         mode;
+  uint8         _pad_rc[6];
 
   // Optical flow
-  float32    of_u, of_v, of_quality;
-  uint8  of_valid;
-  uint8  _pad_of[7];
+  float32       of_u, of_v, of_quality;
+  uint8         of_valid;
+  uint8         _pad_of[7];
 
   // Motors
-  uint16 m0, m1, m2, m3;
-  uint8  _pad_mot[4];
+  uint16        m0, m1, m2, m3;
+  uint8         _pad_mot[4];
 
   // PID setpoints
-  float32    pos_sp_N, pos_sp_E, pos_sp_D;
-  float32    vel_sp_N, vel_sp_E, vel_sp_D;
-  float32    yaw_sp;
-  uint8  pos_sp_valid;
-  uint8  _pad_sp[7];
+  float32       pos_sp_N, pos_sp_E, pos_sp_D;
+  float32       vel_sp_N, vel_sp_E, vel_sp_D;
+  float32       yaw_sp;
+  uint8         pos_sp_valid;
+  uint8         _pad_sp[7];
 };
 
 
@@ -111,6 +111,18 @@ struct __attribute__((packed)) DFC_t_UDPImgHeader {
     uint16 chunk_count;
 };
 
+typedef struct {
+  float32 ax, ay, az;
+  float32 mx, my, mz;
+} DFC_t_CalibSample;
+
+typedef struct {
+  uint32 magic;
+  uint16 seq;       // chunk id
+  uint16 count;     // number of valid samples in this chunk
+  DFC_t_CalibSample payload[16]; // small chunk to keep RPMsg payload comfy
+} DFC_t_CalibChunk;
+
 // stable read via seqlock
 static inline bool seqlock_read(const volatile uint32* seq) {
     uint32 s = __atomic_load_n(seq, __ATOMIC_ACQUIRE);
@@ -121,7 +133,7 @@ static inline bool seqlock_read_retry(const volatile uint32* seq, uint32 beginVa
     return (beginVal != endVal); // retry if changed or smth occured
 }
 inline constexpr size_t getImageDataSize() {
-    return static_cast<size_t>(width) * static_cast<size_t>(height);
+    return static_cast<size_t>(IMG_W) * static_cast<size_t>(IMG_H);
 }
 inline constexpr size_t getImagePortSize() {
     return sizeof(DFC_t_ImageHeader) + getImageDataSize();

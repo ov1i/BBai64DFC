@@ -1,14 +1,13 @@
-#include "controller/RCInputECAP.h"
+#include "controller/rcIA6.h"
 
 extern "C" {
-#include <ti/drv/sciclient/include/tisci/tisci_devices.h>
 #include <ti/drv/sciclient/sciclient.h>
-
-#include <drivers/hw_include/cslr_ecap.h>
-#include <drivers/hw_include/cslr_soc.h>
-
+#include <ti/csl/cslr_ecap.h>
+#include <ti/csl/cslr.h>
+#include <ti/csl/soc.h>
 #include <ti/board/board.h>
-#include <ti/board/src/board_internal.h>
+#include <ti/board/board_cfg.h>
+#include <ti/osal/TaskP.h>
 
 #include <FreeRTOS.h>
 #include <task.h>
@@ -24,22 +23,19 @@ sint32 C_RcIA6::preInit(uint16 id) {
   Sciclient_ConfigPrms_t config; 
   Sciclient_configPrmsInit(&config);
   sint32 status = Sciclient_init(&config);
-  if (status && status != SCICLIENT_EALREADY_OPEN)
-    return status;
+  if (status && status != CSL_PASS) return status;
 
-  struct tisci_msg_set_device_req req = { 0 };
-  struct tisci_msg_set_device_resp resp = { 0 };
+  struct tisci_msg_set_device_req req = {};
+  struct tisci_msg_set_device_resp resp = {};
 
   Sciclient_ReqPrm_t reqParam  = { 0 };
   Sciclient_RespPrm_t respParam = { 0 };
 
   req.id         = id;
   req.state      = TISCI_MSG_VALUE_DEVICE_SW_STATE_ON;
-  req.hdr.type   = TISCI_MSG_SET_DEVICE;
-  req.hdr.host   = TISCI_HOST_ID_MAIN_0;
   req.hdr.flags  = TISCI_MSG_FLAG_AOP;
 
-  reqParam.messageType    = TISCI_MSG_SET_DEVICE_STATE;
+  reqParam.messageType    = TISCI_MSG_SET_DEVICE;
   reqParam.pReqPayload    = (const uint8*)&req;
   reqParam.reqPayloadSize = (uint32)sizeof(req);
   reqParam.timeout        = SCICLIENT_SERVICE_WAIT_FOREVER;
@@ -57,7 +53,7 @@ sint32 C_RcIA6::preInit(uint16 id) {
   return CSL_PASS;
 }
 
-void C_RcIA6::initCaptureEvents(volatile CSL_ecapRegs *ecap) {
+void C_RcIA6::initCaptureEvents(volatile CSL_EcapRegs *ecap) {
   ecap->ECCTL2 = 0; // capture mode, counter stopped
   ecap->ECCLR = 0xFFFF; // clear all pending events start, I'm freshhh I'm cleannn
   ecap->ECEINT = 0x0000; // don't interrupt me
@@ -84,7 +80,7 @@ void C_RcIA6::initCaptureEvents(volatile CSL_ecapRegs *ecap) {
                  (0 << CSL_ECAP_ECCTL2_CAP_APWM_SHIFT);
 }
 
-bool C_RcIA6::read(volatile CSL_ecapRegs *ecap, uint32 &cap1, uint32 &cap2) {
+bool C_RcIA6::read(volatile CSL_EcapRegs *ecap, uint32 &cap1, uint32 &cap2) {
   uint16 flg = ecap->ECFLG;
   if (flg & CSL_ECAP_ECFLG_CEVT2_MASK) {
     cap1 = ecap->CAP1; // event 1 (rising)
@@ -102,23 +98,23 @@ bool C_RcIA6::init(const DFC_t_RcParams &params) {
 
   uint32 muxData = 0x30000u;
   if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG140), muxData) == BOARD_SOK) {
-    UART_printf("U2 pin succesfully set in ECAP input mode (settings: %X)!\r\n", muxData);
+      DebugP_log0("U2 pin succesfully set in ECAP input mode!\r\n");
   } else {
-    UART_printf("U2 pin ECAP input mode switch failed..\r\n");
+      DebugP_log0("U2 pin ECAP input mode switch failed..\r\n");
     return false;
   }
   muxData = 0x30001u;
   if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG142), muxData) == BOARD_SOK) {
-    UART_printf("V6 pin succesfully set in ECAP input mode (settings: %X)!\r\n", muxData);
+      DebugP_log0("V6 pin succesfully set in ECAP input mode!\r\n");
   } else {
-    UART_printf("V6 pin ECAP input mode switch failed..\r\n");
+      DebugP_log0("V6 pin ECAP input mode switch failed..\r\n");
     return false;
   }
 
   if (Board_pinmuxSetReg(BOARD_SOC_DOMAIN_MAIN, static_cast<uint32>(PADCONFIG_OFFSET_REG143), muxData) == BOARD_SOK) {
-    UART_printf("V5 pin succesfully set in ECAP input mode (settings: %X)!\r\n", muxData);
+      DebugP_log0("V5 pin succesfully set in ECAP input mode!\r\n");
   } else {
-    UART_printf("V5 pin ECAP input mode switch failed..\r\n");
+      DebugP_log0("V5 pin ECAP input mode switch failed..\r\n");
     return false;
   }
 
@@ -131,9 +127,9 @@ bool C_RcIA6::init(const DFC_t_RcParams &params) {
     return false;
 
   // Configure capture on all three PINS
-  initCaptureEvents((volatile CSL_ecapRegs *)CSL_ECAP0_CTL_STS_BASE); // P9.28 - Throttle
-  initCaptureEvents((volatile CSL_ecapRegs *)CSL_ECAP1_CTL_STS_BASE); // P9.30 - Pitch
-  initCaptureEvents((volatile CSL_ecapRegs *)CSL_ECAP2_CTL_STS_BASE); // P9.29 - Roll
+  initCaptureEvents((volatile CSL_EcapRegs *)CSL_ECAP0_CTL_STS_BASE); // P9.28 - Throttle
+  initCaptureEvents((volatile CSL_EcapRegs *)CSL_ECAP1_CTL_STS_BASE); // P9.30 - Pitch
+  initCaptureEvents((volatile CSL_EcapRegs *)CSL_ECAP2_CTL_STS_BASE); // P9.29 - Roll
 
   // Prime filters
   m_NormThrottle = fmap(1500.0, m_Params.thr_min_us, m_Params.thr_max_us, 0.0, 1.0);
@@ -148,9 +144,9 @@ bool C_RcIA6::init(const DFC_t_RcParams &params) {
 }
 
 void C_RcIA6::update() {
-  volatile CSL_ecapRegs *pECAP0 = (volatile CSL_ecapRegs *)CSL_ECAP0_CTL_STS_BASE; // throttle
-  volatile CSL_ecapRegs *pECAP1 = (volatile CSL_ecapRegs *)CSL_ECAP1_CTL_STS_BASE; // pitch
-  volatile CSL_ecapRegs *pECAP2 = (volatile CSL_ecapRegs *)CSL_ECAP2_CTL_STS_BASE; // roll
+  volatile CSL_EcapRegs *pECAP0 = (volatile CSL_EcapRegs *)CSL_ECAP0_CTL_STS_BASE; // throttle
+  volatile CSL_EcapRegs *pECAP1 = (volatile CSL_EcapRegs *)CSL_ECAP1_CTL_STS_BASE; // pitch
+  volatile CSL_EcapRegs *pECAP2 = (volatile CSL_EcapRegs *)CSL_ECAP2_CTL_STS_BASE; // roll
 
   const float64 ticks_to_us = 1e6 / m_Params.ecap_clk_hz;
 

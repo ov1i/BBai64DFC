@@ -6,6 +6,8 @@
 -heap   0x1000      /* HEAP AREA SIZE      */
 --symbol_map _Hwi_intcVectorTable=Hwi_intcVectorTable
 
+--retain="*(.resource_table)"
+
 /*--------------------------------------------------------------------------*/
 /*                               Memory Map                                 */
 /*--------------------------------------------------------------------------*/

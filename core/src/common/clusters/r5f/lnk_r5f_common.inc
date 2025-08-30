@@ -10,6 +10,8 @@
 --retain="*(.abortStack)"
 --retain="*(.undStack)"
 --retain="*(.svcStack)"
+--retain="*(.resource_table)"
+--retain="*(.tracebuf)"
 
 --fill_value=0
 --stack_size=0x4000
@@ -118,7 +120,7 @@ SECTIONS
     .bss.devgroup       : {*(.bss.devgroup*)} align(4)         > __CORE_DDR_SPACE
     .const.devgroup     : {*(.const.devgroup*)} align(4)       > __CORE_DDR_SPACE
     .boardcfg_data      : {} align(4)       > __CORE_DDR_SPACE
-    .shared_data        : {*(.shared_data_*)} align(64)      > SHARED_DDR_SPACE
+    .shared_data        : {*(.shared_data_*)} align(64)      > IPC_SHARED
 
     /* USB or any other LLD buffer for benchmarking */
     .benchmark_buffer (NOLOAD) {} align (8)     > __CORE_DDR_SPACE
@@ -126,9 +128,14 @@ SECTIONS
     .resource_table          : 
     {
         __RESOURCE_TABLE = .;
-    }                                           > __CORE_EXT_DATA_BASE
+    } palign(4096)                              > __CORE_EXT_DATA_BASE
 
-    .tracebuf                : {} align(1024)   > __CORE_EXT_DATA
+    .tracebuf (NOLOAD) : 
+    {
+         __TRACEBUF_START = .;
+         *(.tracebuf*)
+         __TRACEBUF_END = .;
+    }   align(1024)                             > __CORE_EXT_DATA
 
     .stack                   : {} align(4)      > __CORE_DDR_SPACE  (HIGH)
 

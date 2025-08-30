@@ -1,46 +1,94 @@
 #!/bin/sh
-set -e
+set -eu
 
-echo "Starting eMMC flash..."
+log(){ echo "[flash-to-emmc] $*"; }
+fail(){ echo "[flash-to-emmc][ERR] $*" >&2; exit 1; }
 
-# Abort if we're running from eMMC
-if grep -q mmcblk0 /proc/cmdline; then
-  echo "You're running from eMMC! Aborting to prevent overwrite."
-  exit 1
-fi
+# Detect SD vs eMMC via /sys removable flag
+detect_devs() {
+  SD=""
+  EMMC=""
+  for b in /sys/block/mmcblk*; do
+    [ -d "$b" ] || continue
+    name=$(basename "$b")
+    if [ -f "$b/removable" ] && [ "$(cat "$b/removable")" = "1" ]; then
+      SD="/dev/$name"
+    else
+      EMMC="/dev/$name"
+    fi
+  done
 
-EMMC_DEV="/dev/mmcblk0"
+  [ -n "$SD" ]   || fail "Could not detect SD device"
+  [ -n "$EMMC" ] || fail "Could not detect eMMC device"
 
-# Clear first few MB of eMMC
-dd if=/dev/zero of=$EMMC_DEV bs=1M count=10
+  # refuse to run if rootfs is already on eMMC
+  rootdev=$(findmnt -no SOURCE / | sed 's/[0-9]*$//')
+  if [ "$rootdev" = "$EMMC" ]; then
+    fail "Already running from eMMC ($EMMC); aborting."
+  fi
 
-# Partition eMMC: 128MB boot (FAT), rest rootfs (ext4)
-parted $EMMC_DEV --script -- mklabel msdos
-parted $EMMC_DEV --script -- mkpart primary fat32 1MiB 128MiB
-parted $EMMC_DEV --script -- mkpart primary ext4 128MiB 100%
+  echo "$SD" "$EMMC"
+}
 
-mkfs.vfat ${EMMC_DEV}p1
-mkfs.ext4 ${EMMC_DEV}p2
+SD_DEV="" EMMC_DEV=""
+read SD_DEV EMMC_DEV <<EOF
+$(detect_devs)
+EOF
+log "SD=$SD_DEV  eMMC=$EMMC_DEV"
 
-# Mount
-mkdir -p /mnt/emmc_boot /mnt/emmc_root
-mount ${EMMC_DEV}p1 /mnt/emmc_boot
-mount ${EMMC_DEV}p2 /mnt/emmc_root
+# Unmount any mounted eMMC partitions
+for p in $(lsblk -ln -o NAME "$EMMC_DEV" | tail -n +2); do
+  m="/dev/$p"
+  if mount | grep -q "^$m "; then
+    umount -f "$m" || true
+  fi
+done
 
-# Copy boot files
-cp -v /boot/* /mnt/emmc_boot/
+# Partition eMMC: GPT, 256MiB FAT32 boot + rest ext4
+log "Partitioning $EMMC_DEV"
+parted -s "$EMMC_DEV" mklabel gpt
+parted -s "$EMMC_DEV" mkpart boot fat32 1MiB 257MiB
+parted -s "$EMMC_DEV" set 1 boot on
+parted -s "$EMMC_DEV" mkpart rootfs ext4 257MiB 100%
 
-# Sync rootfs
-rsync -aAXv / /mnt/emmc_root \
-  --exclude=/mnt --exclude=/proc --exclude=/sys \
-  --exclude=/dev --exclude=/tmp --exclude=/run \
-  --exclude=/var/lib/flashed.flag
+# Wait for kernel to create nodes
+udevadm settle
+BOOT_PART="${EMMC_DEV}p1"
+ROOT_PART="${EMMC_DEV}p2"
 
-# Create flag
-mkdir -p /mnt/emmc_root/var/lib
-touch /mnt/emmc_root/var/lib/flashed.flag
+# Make filesystems
+log "Creating filesystems"
+mkfs.vfat -F32 -n BOOT "$BOOT_PART"
+mkfs.ext4 -F -L rootfs "$ROOT_PART"
 
+# Mount target
+mkdir -p /mnt/emmc-boot /mnt/emmc-root
+mount "$ROOT_PART" /mnt/emmc-root
+mkdir -p /mnt/emmc-root/boot
+mount "$BOOT_PART" /mnt/emmc-boot
+
+# Rsync live rootfs → eMMC (stay on same filesystem with -x)
+log "Syncing rootfs (this can take a while)…"
+rsync -aHAXx --delete \
+  --exclude="/mnt/*" \
+  --exclude="/proc/*" \
+  --exclude="/sys/*" \
+  --exclude="/dev/*" \
+  --exclude="/run/*" \
+  --exclude="/tmp/*" \
+  / /mnt/emmc-root/
+
+# Copy /boot (kernels, DTBs, extlinux/uEnv, etc.)
+log "Copying /boot"
+rsync -aHAX --delete /boot/ /mnt/emmc-boot/
 sync
-umount /mnt/emmc_boot /mnt/emmc_root
 
-echo "Flash complete. Power off and remove SD to boot from eMMC."
+# Marker file on eMMC so first boot can detect it came from SD cloning
+date > /mnt/emmc-root/etc/EMMC_CLONED_FROM_SD
+
+umount /mnt/emmc-boot || true
+umount /mnt/emmc-root || true
+rmdir /mnt/emmc-boot /mnt/emmc-root || true
+
+log "Done. You can power-cycle and switch U-Boot to boot from eMMC."
+exit 0
